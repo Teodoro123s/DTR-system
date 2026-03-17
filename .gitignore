@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# build and temp
+.expo/
+.expo-shared/
+dist/
+build/
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# env and secrets
+.env
+.env.*
+!.env.example
+backend/firebase-service-account.json
+dtr-system-93925-firebase-adminsdk-fbsvc-00ff16ec99.json
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

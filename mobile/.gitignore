@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Environment variables - NEVER commit these
+.env
+.env.local
+.env.*.local
+
+# Firebase config files - contain API keys
+google-services.json
+GoogleService-Info.plist
+
+# Expo
+.expo/
+dist/
+web-build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
