@@ -57,15 +57,16 @@ function StudentManagement() {
     }
   };
 
-  const resetPassword = async (id) => {
-    if (window.confirm('Reset password for this student?')) {
+  const resetCredentials = async (id) => {
+    if (window.confirm('Reset username and password to default format for this student?')) {
       try {
         const token = localStorage.getItem('token');
-        await axios.put(`${API_URL}/students/${id}`, { resetPassword: true }, { headers: { Authorization: `Bearer ${token}` } });
-        alert('Password has been reset to default');
+        await axios.put(`${API_URL}/students/${id}`, { resetCredentials: true }, { headers: { Authorization: `Bearer ${token}` } });
+        alert('Credentials reset: username = user-<Surname>, password = pass-<Surname>');
+        fetchStudents();
       } catch (err) {
-        console.error('Error resetting password:', err);
-        alert('Failed to reset password');
+        console.error('Error resetting credentials:', err);
+        alert('Failed to reset credentials');
       }
     }
   };
@@ -162,7 +163,7 @@ function StudentManagement() {
                       >
                         ✎ Edit
                       </button>
-                      <button onClick={() => resetPassword(student.userId)} className="btn btn-sm btn-warning">
+                      <button onClick={() => resetCredentials(student.userId)} className="btn btn-sm btn-warning">
                         🔑 Reset
                       </button>
                       <button onClick={() => deleteStudent(student.userId)} className="btn btn-sm btn-danger">

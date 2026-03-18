@@ -40,10 +40,16 @@ function Dashboard({ user, setUser }) {
               👥 Students
             </button>
             <button 
-              className={`menu-item ${activeTab === 'dtr' ? 'active' : ''}`}
-              onClick={() => setActiveTab('dtr')}
+              className={`menu-item ${activeTab === 'pending' ? 'active' : ''}`}
+              onClick={() => setActiveTab('pending')}
             >
-              ⏰ DTR Records
+              ⏳ Pending Tickets
+            </button>
+            <button 
+              className={`menu-item ${activeTab === 'approved' ? 'active' : ''}`}
+              onClick={() => setActiveTab('approved')}
+            >
+              ✅ Approved Records
             </button>
           </div>
         </aside>
@@ -52,11 +58,13 @@ function Dashboard({ user, setUser }) {
         <main className="main-content">
           <div className="content-header">
             {activeTab === 'students' && <h2>Student Management</h2>}
-            {activeTab === 'dtr' && <h2>DTR Records</h2>}
+            {activeTab === 'pending' && <h2>Pending Tickets to Review</h2>}
+            {activeTab === 'approved' && <h2>Approved DTR Records</h2>}
           </div>
           <div className="content-body">
             {activeTab === 'students' && <StudentManagement />}
-            {activeTab === 'dtr' && <DTRManagement />}
+            {activeTab === 'pending' && <DTRManagement lockedStatus="pending" />}
+            {activeTab === 'approved' && <DTRManagement lockedStatus="approved" />}
           </div>
         </main>
       </div>

@@ -1,10 +1,13 @@
 {
   "scripts": {
+    "backend:start": "npm --prefix backend run start",
     "web:start": "npm --prefix web run start",
     "mobile:start": "npm --prefix mobile run start",
     "mobile:android": "npm --prefix mobile run android",
     "mobile:ios": "npm --prefix mobile run ios",
-    "dev": "concurrently -n WEB,MOBILE -c blue,green \"npm run web:start\" \"npm run mobile:start\""
+    "dev": "concurrently -n WEB,MOBILE -c blue,green \"npm run web:start\" \"npm run mobile:start\"",
+    "dev:all": "concurrently -n BACKEND,WEB,MOBILE -c yellow,blue,green \"npm run backend:start\" \"npm run web:start\" \"npm run mobile:start\"",
+    "dev:core": "concurrently -n BACKEND,WEB -c yellow,blue \"npm run backend:start\" \"npm run web:start\""
   },
   "dependencies": {
     "expo": "~54.0.0",
