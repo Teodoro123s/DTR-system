@@ -37,6 +37,13 @@ npm install
 expo start
 ```
 
+#### Mobile API Connectivity (Important)
+
+- For physical devices, avoid using `localhost` as backend URL.
+- Set `EXPO_PUBLIC_API_URL` in `mobile/.env` to your current machine IP (example: `http://10.88.111.250:3000`).
+- Restart Expo after changing `.env`: `npx expo start -c`
+- Ensure backend is running on port `3000` before logging in from mobile.
+
 ### 4. Web Admin Setup
 
 ```bash
@@ -111,6 +118,8 @@ Ensure Firestore rules allow read/write for authenticated users as per your secu
 - User profile icon (top-right) routes to profile page
 - Welcome message
 - Carousel actions: Time In, Time Out, My Records
+- Quick Action card for one-tap guided Time In/Time Out
+- Displays last log time for today's attendance activity
 - Notification panel shows latest 5 notifications
 - "View All" link routes to notifications page
 - Navigation flow: Dashboard to Profile, Notifications, and My Records

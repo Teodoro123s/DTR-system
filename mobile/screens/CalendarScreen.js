@@ -3,8 +3,7 @@ import { View, StyleSheet, FlatList } from 'react-native';
 import { Text, Card, Button } from 'react-native-paper';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+import { getApiBaseUrl } from '../utils/api';
 
 export default function CalendarScreen() {
   const [records, setRecords] = useState([]);
@@ -15,7 +14,8 @@ export default function CalendarScreen() {
       const userData = await AsyncStorage.getItem('user');
       setUser(JSON.parse(userData));
       const token = await AsyncStorage.getItem('token');
-      const response = await axios.get(`${API_URL}/dtr/${JSON.parse(userData).userId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const apiBaseUrl = await getApiBaseUrl();
+      const response = await axios.get(`${apiBaseUrl}/dtr/${JSON.parse(userData).userId}`, { headers: { Authorization: `Bearer ${token}` } });
       setRecords(response.data);
     };
     getData();

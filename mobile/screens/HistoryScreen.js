@@ -4,8 +4,7 @@ import { Button, Card, Chip, SegmentedButtons, Snackbar, Text } from 'react-nati
 import { Calendar } from 'react-native-calendars';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+import { getApiBaseUrl } from '../utils/api';
 const PAGE_SIZE = 40;
 
 const getStatusColor = (status) => {
@@ -65,7 +64,8 @@ export default function HistoryScreen() {
         params.set('cursor', cursor);
       }
 
-      const response = await axios.get(`${API_URL}/dtr/${user.userId}?${params.toString()}`, {
+      const apiBaseUrl = await getApiBaseUrl();
+      const response = await axios.get(`${apiBaseUrl}/dtr/${user.userId}?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -170,7 +170,8 @@ export default function HistoryScreen() {
   const handleDelete = async (record) => {
     try {
       const token = await AsyncStorage.getItem('token');
-      await axios.delete(`${API_URL}/dtr/${record.dtrId}`, {
+      const apiBaseUrl = await getApiBaseUrl();
+      await axios.delete(`${apiBaseUrl}/dtr/${record.dtrId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setRecords((prev) => prev.filter((r) => r.dtrId !== record.dtrId));

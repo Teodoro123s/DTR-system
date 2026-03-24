@@ -3,8 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { Button, Card, Text, TextInput, Snackbar } from 'react-native-paper';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+import { getApiBaseUrl } from '../utils/api';
 
 export default function ProfileScreen({ navigation }) {
   const [user, setUser] = useState(null);
@@ -38,8 +37,9 @@ export default function ProfileScreen({ navigation }) {
     setLoading(true);
     try {
       const token = await AsyncStorage.getItem('token');
+      const apiBaseUrl = await getApiBaseUrl();
       await axios.put(
-        `${API_URL}/me/credentials`,
+        `${apiBaseUrl}/me/credentials`,
         { username, currentPassword, newPassword },
         { headers: { Authorization: `Bearer ${token}` } }
       );

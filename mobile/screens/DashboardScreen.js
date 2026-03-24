@@ -1,12 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Modal, ScrollView, StyleSheet, TouchableOpacity, View, Alert } from 'react-native';
+import { Modal, ScrollView, StyleSheet, TouchableOpacity, View, Alert } from 'react-native';
 import { ActivityIndicator, Badge, Button, Card, IconButton, Snackbar, Text } from 'react-native-paper';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { collection, limit, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+import { getApiBaseUrl } from '../utils/api';
 
 const toMillis = (value) => {
   if (!value) return 0;
@@ -20,6 +19,11 @@ const formatDate = (value) => {
   const ms = toMillis(value);
   if (!ms) return 'Unknown date';
   return new Date(ms).toLocaleString();
+};
+
+const parseDate = (value) => {
+  const ms = toMillis(value);
+  return ms ? new Date(ms) : null;
 };
 
 const pairTimes = (record) => {
@@ -40,7 +44,8 @@ export default function DashboardScreen({ navigation }) {
   const [selectedNotification, setSelectedNotification] = useState(null);
   const [isTimedIn, setIsTimedIn] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState(true);
-  const successScale = useState(new Animated.Value(0))[0];
+  const [nextAction, setNextAction] = useState('timeIn');
+  const [lastActionLabel, setLastActionLabel] = useState('No logs yet for today.');
   const lastNotificationIdRef = useRef(null);
 
   useEffect(() => {
@@ -100,7 +105,8 @@ export default function DashboardScreen({ navigation }) {
       }
 
       const currentMonth = new Date().toISOString().slice(0, 7);
-      const response = await axios.get(`${API_URL}/dtr/${activeUserId}?month=${currentMonth}&limit=60`, {
+      const apiBaseUrl = await getApiBaseUrl();
+      const response = await axios.get(`${apiBaseUrl}/dtr/${activeUserId}?month=${currentMonth}&limit=60`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -110,44 +116,55 @@ export default function DashboardScreen({ navigation }) {
 
       if (!todayRecord) {
         setIsTimedIn(false);
+        setNextAction('timeIn');
+        setLastActionLabel('No logs yet for today.');
       } else {
         const inLen = Array.isArray(todayRecord.timeIn) ? todayRecord.timeIn.length : 0;
         const outLen = Array.isArray(todayRecord.timeOut) ? todayRecord.timeOut.length : 0;
-        setIsTimedIn(inLen > outLen);
+        const currentlyTimedIn = inLen > outLen;
+        setIsTimedIn(currentlyTimedIn);
+        setNextAction(currentlyTimedIn ? 'timeOut' : 'timeIn');
+
+        const lastIn = inLen ? parseDate(todayRecord.timeIn[inLen - 1]) : null;
+        const lastOut = outLen ? parseDate(todayRecord.timeOut[outLen - 1]) : null;
+        const latest = [lastIn, lastOut].filter(Boolean).sort((a, b) => b.getTime() - a.getTime())[0];
+
+        if (latest) {
+          setLastActionLabel(`Last log: ${latest.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+        } else {
+          setLastActionLabel('No logs yet for today.');
+        }
       }
     } catch (err) {
       setIsTimedIn(false);
+      setNextAction('timeIn');
+      setLastActionLabel('Unable to verify current session.');
     } finally {
       setLoadingStatus(false);
     }
-  };
-
-  const playSuccessAnimation = () => {
-    successScale.setValue(0.7);
-    Animated.sequence([
-      Animated.timing(successScale, { toValue: 1.05, duration: 200, useNativeDriver: true }),
-      Animated.timing(successScale, { toValue: 1, duration: 220, useNativeDriver: true }),
-    ]).start();
   };
 
   const handleTimeInOut = async (action) => {
     setLoading(true);
     try {
       const token = await AsyncStorage.getItem('token');
-      await axios.post(`${API_URL}/dtr`, { action }, { headers: { Authorization: `Bearer ${token}` } });
+      const apiBaseUrl = await getApiBaseUrl();
+      await axios.post(`${apiBaseUrl}/dtr`, { action }, { headers: { Authorization: `Bearer ${token}` } });
       setMessage(`${action === 'timeIn' ? 'Timed In' : 'Timed Out'} successfully`);
-      playSuccessAnimation();
       await refreshSessionStatus();
     } catch (err) {
       setMessage(err.response?.data?.error || 'Action failed');
+      // Re-sync local status so UI reflects backend truth after any action error.
+      await refreshSessionStatus();
     }
     setLoading(false);
   };
 
   const confirmAction = (action) => {
+    const actionLabel = action === 'timeIn' ? 'Time In' : 'Time Out';
     Alert.alert(
-      'Confirm',
-      `Are you sure you want to ${action}?`,
+      `${actionLabel} Confirmation`,
+      `Are you sure you want to ${actionLabel.toLowerCase()} now?`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'OK', onPress: () => handleTimeInOut(action) },
@@ -157,6 +174,10 @@ export default function DashboardScreen({ navigation }) {
 
   const statusText = loadingStatus ? 'Checking status...' : isTimedIn ? 'Currently Timed In' : 'Currently Timed Out';
   const statusStyle = isTimedIn ? styles.statusIn : styles.statusOut;
+  const quickActionLabel = nextAction === 'timeIn' ? 'Time In Now' : 'Time Out Now';
+  const quickActionHelp = isTimedIn
+    ? 'You are currently timed in. Tap below when you are ready to end your session.'
+    : 'You are currently timed out. Tap below to start your session.';
 
   return (
     <View style={styles.container}>
@@ -173,13 +194,29 @@ export default function DashboardScreen({ navigation }) {
         {loadingStatus && <ActivityIndicator size="small" style={styles.statusLoader} />}
       </View>
 
+      <Card style={styles.quickActionCard}>
+        <Card.Content>
+          <Text style={styles.quickActionTitle}>Quick Action</Text>
+          <Text style={styles.quickActionDesc}>{quickActionHelp}</Text>
+          <Text style={styles.quickActionMeta}>{lastActionLabel}</Text>
+          <Button
+            mode="contained"
+            disabled={loading || loadingStatus}
+            loading={loading}
+            onPress={() => confirmAction(nextAction)}
+          >
+            {quickActionLabel}
+          </Button>
+        </Card.Content>
+      </Card>
+
       <Text style={styles.sectionTitle}>Main Actions</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carouselContainer}>
         <Card style={styles.actionCard}>
           <Card.Content>
             <Text style={styles.actionTitle}>Time In</Text>
             <Text style={styles.actionDesc}>Start your active session.</Text>
-            <Button mode="contained" disabled={isTimedIn || loading} onPress={() => confirmAction('timeIn')}>
+            <Button mode="contained" disabled={isTimedIn || loading || loadingStatus} onPress={() => confirmAction('timeIn')}>
               Time In
             </Button>
           </Card.Content>
@@ -189,7 +226,7 @@ export default function DashboardScreen({ navigation }) {
           <Card.Content>
             <Text style={styles.actionTitle}>Time Out</Text>
             <Text style={styles.actionDesc}>End your active session.</Text>
-            <Button mode="contained" disabled={!isTimedIn || loading} onPress={() => confirmAction('timeOut')}>
+            <Button mode="contained" disabled={!isTimedIn || loading || loadingStatus} onPress={() => confirmAction('timeOut')}>
               Time Out
             </Button>
           </Card.Content>
@@ -230,10 +267,6 @@ export default function DashboardScreen({ navigation }) {
           )}
         </Card.Content>
       </Card>
-
-      <Animated.View style={[styles.successPill, { transform: [{ scale: successScale }] }]} pointerEvents="none">
-        <Text style={styles.successText}>Action saved</Text>
-      </Animated.View>
 
       <Modal visible={!!selectedNotification} transparent animationType="slide" onRequestClose={() => setSelectedNotification(null)}>
         <View style={styles.modalBackdrop}>
@@ -300,6 +333,25 @@ const styles = StyleSheet.create({
   },
   statusLoader: {
     marginLeft: 8,
+  },
+  quickActionCard: {
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  quickActionTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  quickActionDesc: {
+    fontSize: 13,
+    color: '#63708a',
+    marginBottom: 8,
+  },
+  quickActionMeta: {
+    fontSize: 12,
+    color: '#4f5e7a',
+    marginBottom: 10,
   },
   carouselContainer: {
     paddingBottom: 6,
@@ -381,18 +433,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#63708a',
     marginBottom: 4,
-  },
-  successPill: {
-    position: 'absolute',
-    right: 20,
-    bottom: 80,
-    backgroundColor: '#2e7d32',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 18,
-  },
-  successText: {
-    color: '#fff',
-    fontWeight: '700',
   },
 });

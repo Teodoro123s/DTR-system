@@ -3,8 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { TextInput, Button, Text, Snackbar } from 'react-native-paper';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'; // Change to your backend URL
+import { getApiCandidates, persistApiBaseUrl } from '../utils/api';
 
 export default function LoginScreen({ navigation }) {
   const [username, setUsername] = useState('');
@@ -15,18 +14,46 @@ export default function LoginScreen({ navigation }) {
   const handleLogin = async () => {
     setLoading(true);
     try {
-      const response = await axios.post(`${API_URL}/login`, { username, password });
-      await AsyncStorage.setItem('token', response.data.token);
-      await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
-      navigation.replace('Dashboard');
+      const candidates = await getApiCandidates();
+      let networkFailed = true;
+      let lastTried = '';
+
+      for (const baseUrl of candidates) {
+        lastTried = baseUrl;
+        try {
+          const response = await axios.post(
+            `${baseUrl}/login`,
+            { username, password },
+            { timeout: 3500 }
+          );
+
+          await persistApiBaseUrl(baseUrl);
+          await AsyncStorage.setItem('token', response.data.token);
+          await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
+          navigation.replace('Dashboard');
+          return;
+        } catch (err) {
+          // If server responded, credentials are wrong; no need to try more URLs.
+          if (err.response) {
+            networkFailed = false;
+            setError(err.response?.data?.error || 'Login failed');
+            return;
+          }
+        }
+      }
+
+      if (networkFailed) {
+        setError(`Cannot reach server. Last tried: ${lastTried || 'none'}`);
+      }
     } catch (err) {
       if (err.code === 'ERR_NETWORK') {
         setError('Cannot reach server. Check backend is running and API URL is correct.');
       } else {
         setError(err.response?.data?.error || 'Login failed');
       }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (

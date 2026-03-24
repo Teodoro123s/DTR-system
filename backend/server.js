@@ -321,31 +321,43 @@ app.post('/dtr', verifyToken, requireDB, async (req, res) => {
 });
 
 app.get('/dtr/:studentId', verifyToken, requireDB, async (req, res) => {
-  const { studentId } = req.params;
-  if (req.user.role !== 'admin' && req.user.userId !== studentId) return res.status(403).json({ error: 'Access denied' });
+  try {
+    const { studentId } = req.params;
+    if (req.user.role !== 'admin' && req.user.userId !== studentId) return res.status(403).json({ error: 'Access denied' });
 
-  const { month, limit = '50', cursor } = req.query;
-  const pageSize = Math.min(Number(limit) || 50, 100);
+    const { month, limit = '50' } = req.query;
+    const pageSize = Math.min(Number(limit) || 50, 100);
 
-  let queryRef = db.collection('dtr_records').where('studentId', '==', studentId).orderBy('date', 'desc');
-  if (month && /^\d{4}-\d{2}$/.test(month)) {
-    queryRef = queryRef.where('date', '>=', `${month}-01`).where('date', '<=', `${month}-31`);
+    // Keep query index-friendly: fetch by student only, then filter month in memory.
+    // Do not apply a low Firestore limit here; it can hide today's record and desync UI state.
+    const snapshot = await db.collection('dtr_records').where('studentId', '==', studentId).get();
+    let records = snapshot.docs.map(doc => doc.data());
+
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      records = records.filter((r) => (r.date || '').startsWith(month));
+    }
+
+    // Sort by date descending on the server side to avoid composite index requirements.
+    records = records
+      .sort((a, b) => {
+        const dateA = parseDate(a.date);
+        const dateB = parseDate(b.date);
+        return dateB - dateA;
+      })
+      .slice(0, pageSize);
+
+    if (month || req.query.limit) {
+      return res.json({
+        records,
+        nextCursor: records.length === pageSize ? records[records.length - 1]?.date : null,
+      });
+    }
+
+    res.json(records);
+  } catch (err) {
+    console.error('Failed to fetch DTR records:', err.message);
+    res.status(500).json({ error: 'Failed to fetch DTR records' });
   }
-  if (cursor) {
-    queryRef = queryRef.startAfter(cursor);
-  }
-
-  const snapshot = await queryRef.limit(pageSize).get();
-  const records = snapshot.docs.map(doc => doc.data());
-
-  if (month || cursor || req.query.limit) {
-    return res.json({
-      records,
-      nextCursor: records.length === pageSize ? records[records.length - 1]?.date : null,
-    });
-  }
-
-  res.json(records);
 });
 
 app.put('/dtr/:dtrId', verifyToken, async (req, res) => {
