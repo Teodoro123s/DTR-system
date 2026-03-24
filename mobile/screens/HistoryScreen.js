@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Alert, FlatList, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Button, Card, Chip, SegmentedButtons, Snackbar, Text } from 'react-native-paper';
 import { Calendar } from 'react-native-calendars';
 import axios from 'axios';
@@ -159,7 +159,7 @@ export default function HistoryScreen() {
           </View>
           {pairTimes(item).map((pair) => (
             <Text key={`${item.dtrId}-${pair.index}`} style={styles.pairRow}>
-              Time In {pair.index}: {pair.timeIn} -> Time Out {pair.index}: {pair.timeOut}
+              Time In {pair.index}: {pair.timeIn} {'->'} Time Out {pair.index}: {pair.timeOut}
             </Text>
           ))}
         </Card.Content>
@@ -186,6 +186,49 @@ export default function HistoryScreen() {
     Alert.alert('Confirm Delete', 'Delete this pending DTR record?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => handleDelete(record) },
+    ]);
+  };
+
+  const persistRecordSessions = async (record, nextTimeIn, nextTimeOut, successMsg) => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      const apiBaseUrl = await getApiBaseUrl();
+      await axios.put(
+        `${apiBaseUrl}/dtr/${record.dtrId}`,
+        { timeIn: nextTimeIn, timeOut: nextTimeOut },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      setRecords((prev) =>
+        prev.map((r) => (r.dtrId === record.dtrId ? { ...r, timeIn: nextTimeIn, timeOut: nextTimeOut } : r))
+      );
+
+      setSelectedRecord((prev) => (prev ? { ...prev, timeIn: nextTimeIn, timeOut: nextTimeOut } : prev));
+      setMessage(successMsg);
+    } catch (err) {
+      setMessage(err.response?.data?.error || 'Update failed');
+    }
+  };
+
+  const deletePair = async (record, pairIdx) => {
+    const nextTimeIn = [...(record.timeIn || [])];
+    const nextTimeOut = [...(record.timeOut || [])];
+
+    if (pairIdx < nextTimeIn.length) nextTimeIn.splice(pairIdx, 1);
+    if (pairIdx < nextTimeOut.length) nextTimeOut.splice(pairIdx, 1);
+
+    if (nextTimeIn.length === 0) {
+      await handleDelete(record);
+      return;
+    }
+
+    await persistRecordSessions(record, nextTimeIn, nextTimeOut, 'Session deleted');
+  };
+
+  const confirmDeletePair = (record, pairIdx) => {
+    Alert.alert('Delete Session', `Delete Time In/Out #${pairIdx + 1} from this day?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => deletePair(record, pairIdx) },
     ]);
   };
 
@@ -269,13 +312,22 @@ export default function HistoryScreen() {
       <Modal visible={!!selectedRecord} transparent animationType="slide" onRequestClose={() => setSelectedRecord(null)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
+            <ScrollView contentContainerStyle={styles.modalScrollContent}>
             <Text style={styles.modalTitle}>DTR Detail</Text>
             <Text style={styles.modalInfo}>Date: {selectedRecord?.date || '-'}</Text>
             <Text style={styles.modalInfo}>Status: {selectedRecord?.status || '-'}</Text>
             {pairTimes(selectedRecord || {}).map((pair) => (
-              <Text key={`modal-${pair.index}`} style={styles.modalInfo}>
-                Time In {pair.index}: {pair.timeIn} -> Time Out {pair.index}: {pair.timeOut}
-              </Text>
+              <View key={`modal-${pair.index}`} style={styles.sessionBlock}>
+                <Text style={styles.modalInfo}>Time In {pair.index}: {pair.timeIn}</Text>
+                <Text style={styles.modalInfo}>Time Out {pair.index}: {pair.timeOut}</Text>
+                {selectedRecord?.status === 'pending' && (
+                  <View style={styles.sessionActionRow}>
+                    <Button compact mode="outlined" onPress={() => confirmDeletePair(selectedRecord, pair.index - 1)}>
+                      Delete Session {pair.index}
+                    </Button>
+                  </View>
+                )}
+              </View>
             ))}
             {selectedRecord?.status === 'pending' && (
               <Button mode="outlined" style={styles.deleteBtn} onPress={() => confirmDelete(selectedRecord)}>
@@ -283,6 +335,7 @@ export default function HistoryScreen() {
               </Button>
             )}
             <Button mode="contained" onPress={() => setSelectedRecord(null)}>Close</Button>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -362,6 +415,10 @@ const styles = StyleSheet.create({
     padding: 16,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
+    maxHeight: '85%',
+  },
+  modalScrollContent: {
+    paddingBottom: 6,
   },
   modalTitle: {
     fontSize: 18,
@@ -371,6 +428,18 @@ const styles = StyleSheet.create({
   modalInfo: {
     marginBottom: 4,
     color: '#4f5d77',
+  },
+  sessionBlock: {
+    borderWidth: 1,
+    borderColor: '#e8edf6',
+    borderRadius: 10,
+    padding: 8,
+    marginBottom: 8,
+  },
+  sessionActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 6,
   },
   deleteBtn: {
     marginTop: 8,

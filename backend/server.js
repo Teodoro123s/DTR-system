@@ -360,14 +360,39 @@ app.get('/dtr/:studentId', verifyToken, requireDB, async (req, res) => {
   }
 });
 
-app.put('/dtr/:dtrId', verifyToken, async (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+app.put('/dtr/:dtrId', verifyToken, requireDB, async (req, res) => {
   const { status, timeIn, timeOut } = req.body;
-  const updateData = { status, editedByAdmin: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() };
-  if (timeIn) updateData.timeIn = timeIn;
-  if (timeOut) updateData.timeOut = timeOut;
-  await db.collection('dtr_records').doc(req.params.dtrId).update(updateData);
-  res.json({ message: 'DTR updated' });
+  const dtrRef = db.collection('dtr_records').doc(req.params.dtrId);
+  const dtrDoc = await dtrRef.get();
+  if (!dtrDoc.exists) return res.status(404).json({ error: 'DTR not found' });
+
+  const dtr = dtrDoc.data();
+
+  if (req.user.role === 'admin') {
+    const updateData = { status, editedByAdmin: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+    if (timeIn) updateData.timeIn = timeIn;
+    if (timeOut) updateData.timeOut = timeOut;
+    await dtrRef.update(updateData);
+    return res.json({ message: 'DTR updated' });
+  }
+
+  // Student can only update own pending record and only time arrays.
+  if (req.user.userId !== dtr.studentId) return res.status(403).json({ error: 'Access denied' });
+  if (dtr.status !== 'pending') return res.status(403).json({ error: 'Only pending records can be edited' });
+  if (!Array.isArray(timeIn) || !Array.isArray(timeOut)) {
+    return res.status(400).json({ error: 'timeIn and timeOut arrays are required' });
+  }
+  if (timeIn.length < timeOut.length || timeIn.length > timeOut.length + 1) {
+    return res.status(400).json({ error: 'Invalid time session sequence' });
+  }
+
+  await dtrRef.update({
+    timeIn,
+    timeOut,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  res.json({ message: 'Pending DTR sessions updated' });
 });
 
 app.delete('/dtr/:dtrId', verifyToken, async (req, res) => {
