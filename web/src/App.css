@@ -6,7 +6,8 @@
 
 body {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background-color: #f5f5f5;
+  background-color: #f2f6fb;
+  color: #132238;
 }
 
 .App {
@@ -14,29 +15,49 @@ body {
   height: 100vh;
 }
 
-/* Login Styles */
 .login {
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background:
+    radial-gradient(circle at 15% 20%, rgba(121, 186, 255, 0.35), transparent 28%),
+    radial-gradient(circle at 80% 80%, rgba(24, 89, 156, 0.25), transparent 28%),
+    linear-gradient(145deg, #e5eef9 0%, #f8fbff 100%);
 }
 
 .login-container {
   background: white;
-  padding: 3rem 2.5rem;
-  border-radius: 8px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  padding: 2.4rem 2rem;
+  border-radius: 14px;
+  border: 1px solid #d9e2ee;
+  box-shadow: 0 22px 48px rgba(13, 40, 74, 0.14);
   width: 100%;
-  max-width: 400px;
+  max-width: 430px;
+}
+
+.login-kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #2f67a1;
+  text-align: center;
+  margin-bottom: 0.35rem;
 }
 
 .login h1 {
   text-align: center;
-  color: #2d3748;
-  margin-bottom: 1.5rem;
-  font-size: 1.8rem;
+  color: #1c2f46;
+  margin-bottom: 0.45rem;
+  font-size: 1.7rem;
+}
+
+.login-subtitle {
+  text-align: center;
+  margin-bottom: 1.35rem;
+  font-size: 0.92rem;
+  color: #5b6d84;
 }
 
 .login form {
@@ -60,7 +81,7 @@ body {
 .login input {
   padding: 0.75rem;
   border: 1px solid #cbd5e0;
-  border-radius: 4px;
+  border-radius: 8px;
   font-size: 1rem;
   transition: border-color 0.3s ease;
 }
@@ -73,10 +94,10 @@ body {
 
 .login button {
   padding: 0.75rem;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #156ac2 0%, #0f4f90 100%);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 9px;
   cursor: pointer;
   font-weight: 600;
   font-size: 1rem;
@@ -85,7 +106,14 @@ body {
 
 .login button:hover {
   transform: translateY(-2px);
-  box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 6px 16px rgba(21, 106, 194, 0.34);
+}
+
+.login button:disabled {
+  opacity: 0.55;
+  transform: none;
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 .login button:active {
@@ -93,10 +121,11 @@ body {
 }
 
 .error {
-  color: #ff6b6b;
-  background-color: #ffe0e0;
+  color: #b43a3a;
+  background-color: #fff0f0;
+  border: 1px solid #f3caca;
   padding: 0.75rem;
-  border-radius: 4px;
+  border-radius: 8px;
   font-size: 0.9rem;
   text-align: center;
   margin-top: 1rem;

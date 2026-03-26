@@ -8,10 +8,17 @@ function Login({ setUser }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const canSubmit = username.trim() && password.trim();
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (!canSubmit) {
+      setError('Please enter username and password.');
+      return;
+    }
+
     setLoading(true);
+    setError('');
     try {
       const response = await axios.post(`${API_URL}/login`, { username, password });
       localStorage.setItem('token', response.data.token);
@@ -27,7 +34,9 @@ function Login({ setUser }) {
   return (
     <div className="login">
       <div className="login-container">
-        <h1>📋 DTR System</h1>
+        <p className="login-kicker">Attendance Platform</p>
+        <h1>DTR System</h1>
+        <p className="login-subtitle">Sign in to manage students, pending requests, and attendance records.</p>
         <form onSubmit={handleLogin}>
           <div className="login-group">
             <label htmlFor="username">Username</label>
@@ -52,11 +61,11 @@ function Login({ setUser }) {
               required
             />
           </div>
-          <button type="submit" disabled={loading}>
+          <button type="submit" disabled={loading || !canSubmit}>
             {loading ? 'Logging in...' : 'Login'}
           </button>
         </form>
-        {error && <p className="error">❌ {error}</p>}
+        {error && <p className="error">{error}</p>}
       </div>
     </div>
   );

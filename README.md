@@ -188,3 +188,43 @@ Create an admin user manually in Firestore or add a setup script.
 - A custom Node.js backend is used for API endpoints and business logic
 - JWT for authentication
 - Bcrypt for password hashing
+
+## Recent Changes (March 2026)
+
+### Backend/API
+
+- Added stronger API middleware defaults:
+- Security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`)
+- `x-powered-by` disabled
+- JSON body limit configured
+- Added JWT startup validation (requires strong `JWT_SECRET`)
+- Improved CORS handling for development and production behavior
+- Added DTR detail endpoint:
+- `GET /dtr/detail/:dtrId`
+- Student (owner) and admin authorized access only
+- Improved DTR pagination with cursor handling for month records
+
+### Web Admin
+
+- Dashboard and management UI refreshed for cleaner navigation and common icon style
+- Added `Reports` module for overall DTR reporting (daily/weekly trend charts and student progress)
+- Added student-specific DTR reporting inside `Students` module:
+- Select a student + month
+- View that specific student's DTR records and status counts
+- Separate from overall sidebar `Reports` view
+
+### Mobile App
+
+- `My Records` updated to month-first workflow and improved scrolling layout
+- Added direct server fetch for DTR detail modal to ensure latest record details
+- Added monthly Excel export with review-first flow:
+- Preview table before download
+- Table includes day number, time in, time out, status, daily total
+- Footer shows overall total hours for selected month
+- Notifications reliability improved with backend fallback and read-sync updates
+- Removed User ID display from mobile profile UI for safer user-facing privacy
+
+### Operational Notes
+
+- If `npm start` in backend exits with `EADDRINUSE`, port `3000` is already in use by another running backend process.
+- For mobile physical-device testing, ensure `EXPO_PUBLIC_API_URL` points to a reachable backend host/IP.

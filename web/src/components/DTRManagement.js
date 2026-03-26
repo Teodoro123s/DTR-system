@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import './DTRManagement.css';
 
@@ -9,6 +9,8 @@ function DTRManagement({ lockedStatus }) {
   const [students, setStudents] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState('');
   const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [noticeType, setNoticeType] = useState('info');
   const [editingRecord, setEditingRecord] = useState(null);
   const [editTimeIn, setEditTimeIn] = useState('');
   const [editTimeOut, setEditTimeOut] = useState('');
@@ -32,10 +34,12 @@ function DTRManagement({ lockedStatus }) {
       setStudents(response.data);
     } catch (err) {
       console.error('Error fetching students:', err);
+      setNoticeType('error');
+      setNotice('Unable to load students.');
     }
   };
 
-  const fetchDTR = async (studentId) => {
+  const fetchDTR = useCallback(async (studentId) => {
     if (!studentId) {
       setRecords([]);
       return;
@@ -52,11 +56,12 @@ function DTRManagement({ lockedStatus }) {
       setRecords(response.data.records || response.data || []);
     } catch (err) {
       console.error('Error fetching DTR records:', err);
-      alert('Failed to fetch DTR records');
+      setNoticeType('error');
+      setNotice('Failed to fetch DTR records.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedMonth]);
 
   const getShiftsForRecord = (rec) => {
     const inArr = rec.timeIn || [];
@@ -87,10 +92,13 @@ function DTRManagement({ lockedStatus }) {
       
       const token = localStorage.getItem('token');
       await axios.put(`${API_URL}/dtr/${rec.dtrId}`, { shiftStatuses: newStatuses }, { headers: { Authorization: `Bearer ${token}` } });
+      setNoticeType('success');
+      setNotice(`Shift ${shift.index + 1} marked as ${status}.`);
       if (selectedStudent) fetchDTR(selectedStudent);
     } catch (err) {
       console.error('Error updating status:', err);
-      alert('Failed to update status');
+      setNoticeType('error');
+      setNotice('Failed to update status.');
     }
   };
 
@@ -112,10 +120,13 @@ function DTRManagement({ lockedStatus }) {
       } else {
         await axios.put(`${API_URL}/dtr/${rec.dtrId}`, { timeIn: newTimeIn, timeOut: newTimeOut, shiftStatuses: newStatuses }, { headers: { Authorization: `Bearer ${token}` } });
       }
+      setNoticeType('success');
+      setNotice('Shift deleted successfully.');
       if (selectedStudent) fetchDTR(selectedStudent);
     } catch (err) {
       console.error('Error deleting shift:', err);
-      alert('Failed to delete shift');
+      setNoticeType('error');
+      setNotice('Failed to delete shift.');
     }
   };
 
@@ -150,31 +161,21 @@ function DTRManagement({ lockedStatus }) {
 
       await axios.put(`${API_URL}/dtr/${rec.dtrId}`, { timeIn: newTimeIn, timeOut: newTimeOut }, { headers: { Authorization: `Bearer ${token}` } });
       setEditingRecord(null);
+      setNoticeType('success');
+      setNotice('Shift time updated.');
       if (selectedStudent) fetchDTR(selectedStudent);
     } catch (err) {
       console.error('Error editing shift:', err);
-      alert('Failed to edit shift record');
-    }
-  };
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'approved':
-        return '#48bb78';
-      case 'declined':
-        return '#ff6b6b';
-      case 'pending':
-        return '#f59e0b';
-      default:
-        return '#95a5a6';
+      setNoticeType('error');
+      setNotice('Failed to edit shift record.');
     }
   };
 
   const getStatusLabel = (status) => {
     const labels = {
-      approved: '✓ Approved',
-      declined: '✕ Declined',
-      pending: '⏳ Pending'
+      approved: 'Approved',
+      declined: 'Declined',
+      pending: 'Pending'
     };
     return labels[status] || status;
   };
@@ -184,50 +185,66 @@ function DTRManagement({ lockedStatus }) {
     if (selectedStudent) {
       fetchDTR(selectedStudent);
     }
-  }, [selectedMonth]);
+  }, [fetchDTR, selectedMonth, selectedStudent]);
 
   const onStudentChange = (e) => {
     setSelectedStudent(e.target.value);
     fetchDTR(e.target.value);
   };
 
+  const flattenedShifts = records.flatMap((record) => getShiftsForRecord(record));
+  const visibleShiftCount = flattenedShifts.filter((shift) => selectedStatus === 'all' || shift.status === selectedStatus).length;
+
   return (
     <div className="dtr-management">
-      {/* Filters Section */}
-      <div className="student-select-section" style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <div style={{ flex: 1, minWidth: '250px' }}>
-          <h3 style={{ marginBottom: '8px', fontSize: '0.95rem' }}>Select Student</h3>
-          <select value={selectedStudent} onChange={onStudentChange} className="student-select">
-            <option value="">-- Choose a student --</option>
-            {students.map(student => (
-              <option key={student.userId} value={student.userId}>
-                {student.firstName} {student.lastName} ({student.username})
-              </option>
-            ))}
-          </select>
-        </div>
-        <div style={{ flex: 1, minWidth: '200px' }}>
-          <h3 style={{ marginBottom: '8px', fontSize: '0.95rem' }}>Filter by Month</h3>
-          <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="student-select" />
-        </div>
-        {!lockedStatus && (
-          <div style={{ flex: 1, minWidth: '200px' }}>
-            <h3 style={{ marginBottom: '8px', fontSize: '0.95rem' }}>Filter by Status</h3>
-            <select value={selectedStatus} onChange={e => setSelectedStatus(e.target.value)} className="student-select">
-              <option value="all">All Records</option>
-              <option value="approved">Approved Only</option>
-              <option value="pending">Pending Only</option>
-              <option value="declined">Declined Only</option>
+      {notice && <p className={`notice-banner notice-${noticeType}`}>{notice}</p>}
+
+      <div className="student-select-section">
+        <div className="filter-grid">
+          <div className="filter-field">
+            <h3>Select Student</h3>
+            <select value={selectedStudent} onChange={onStudentChange} className="student-select">
+              <option value="">-- Choose a student --</option>
+              {students.map(student => (
+                <option key={student.userId} value={student.userId}>
+                  {student.firstName} {student.lastName} ({student.username})
+                </option>
+              ))}
             </select>
           </div>
-        )}
+          <div className="filter-field">
+            <h3>Filter by Month</h3>
+            <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="student-select" />
+          </div>
+          {!lockedStatus && (
+            <div className="filter-field">
+              <h3>Filter by Status</h3>
+              <select value={selectedStatus} onChange={e => setSelectedStatus(e.target.value)} className="student-select">
+                <option value="all">All Records</option>
+                <option value="approved">Approved Only</option>
+                <option value="pending">Pending Only</option>
+                <option value="declined">Declined Only</option>
+              </select>
+            </div>
+          )}
+        </div>
+
+        <button
+          className="btn-refresh"
+          onClick={() => selectedStudent && fetchDTR(selectedStudent)}
+          disabled={!selectedStudent || loading}
+        >
+          {loading ? 'Refreshing...' : 'Refresh Results'}
+        </button>
       </div>
 
       {selectedStudent && (
         <div className="dtr-records-section">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-            <h3 style={{ margin: 0 }}>📋 Match Results</h3>
+          <div className="records-header">
+            <h3>Match Results</h3>
+            <p>{visibleShiftCount} shift(s) match the active filters.</p>
           </div>
+
           {loading ? (
             <p className="loading">Loading records...</p>
           ) : records.length === 0 ? (
@@ -251,7 +268,7 @@ function DTRManagement({ lockedStatus }) {
                       {visibleShifts.map(shift => (
                       <div key={`${shift.dtrId}-${shift.index}`} className="gc-shift-item">
                         <div className="gc-shift-icon">
-                          <span>🕒</span>
+                          <span>Shift</span>
                         </div>
                         <div className="gc-shift-content">
                           <div className="gc-shift-title">Shift {shift.index + 1}</div>
@@ -264,7 +281,7 @@ function DTRManagement({ lockedStatus }) {
 
                         <div className="gc-shift-status">
                           <span className={`status-badge status-${shift.status}`}>
-                            {getStatusLabel(shift.status).replace(/[✓✕⏳] /g, '')}
+                            {getStatusLabel(shift.status)}
                           </span>
                         </div>
 
@@ -274,15 +291,15 @@ function DTRManagement({ lockedStatus }) {
                               <input type="time" value={editTimeIn} onChange={e => setEditTimeIn(e.target.value)} />
                               <span>to</span>
                               <input type="time" value={editTimeOut} onChange={e => setEditTimeOut(e.target.value)} />
-                              <button onClick={() => saveEdit(shift)} className="btn-approve" title="Save">💾</button>
-                              <button onClick={() => setEditingRecord(null)} className="btn-delete" title="Cancel">✕</button>
+                              <button onClick={() => saveEdit(shift)} className="btn-approve" title="Save">Save</button>
+                              <button onClick={() => setEditingRecord(null)} className="btn-delete" title="Cancel">Cancel</button>
                             </div>
                           ) : (
                             <>
-                              <button onClick={() => updateShiftStatus(shift, 'approved')} className="btn-approve" title="Approve">✓</button>
-                              <button onClick={() => updateShiftStatus(shift, 'declined')} className="btn-decline" title="Decline">✕</button>
-                              <button onClick={() => startEditing(shift)} className="btn-edit" title="Edit">✎</button>
-                              <button onClick={() => deleteShift(shift)} className="btn-delete" title="Delete">🗑</button>
+                              <button onClick={() => updateShiftStatus(shift, 'approved')} className="btn-approve" title="Approve">Approve</button>
+                              <button onClick={() => updateShiftStatus(shift, 'declined')} className="btn-decline" title="Decline">Decline</button>
+                              <button onClick={() => startEditing(shift)} className="btn-edit" title="Edit">Edit</button>
+                              <button onClick={() => deleteShift(shift)} className="btn-delete" title="Delete">Delete</button>
                             </>
                           )}
                         </div>

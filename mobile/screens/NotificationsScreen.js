@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FlatList, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { FlatList, Modal, RefreshControl, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ActivityIndicator, Button, Card, Snackbar, Text } from 'react-native-paper';
 import { collection, limit, onSnapshot, query, where } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../firebaseConfig';
+import axios from 'axios';
+import { getApiBaseUrl } from '../utils/api';
 
 const PAGE_SIZE = 15;
 
@@ -21,71 +23,183 @@ const formatDate = (value) => {
   return new Date(ms).toLocaleString();
 };
 
+const sortNotifications = (list = []) => {
+  return [...list].sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+};
+
 export default function NotificationsScreen() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [refreshing, setRefreshing] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
   const [selected, setSelected] = useState(null);
   const [toast, setToast] = useState('');
+  const [reloadToken, setReloadToken] = useState(0);
+
+  const fetchFromBackend = async ({ silent = false } = {}) => {
+    try {
+      const userRaw = await AsyncStorage.getItem('user');
+      const token = await AsyncStorage.getItem('token');
+      const user = JSON.parse(userRaw || '{}');
+      if (!user?.userId || !token) {
+        if (!silent) setToast('No active user session. Please login again.');
+        setItems([]);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+
+      const apiBaseUrl = await getApiBaseUrl();
+      const response = await axios.get(`${apiBaseUrl}/notifications/${user.userId}?limit=300`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const next = Array.isArray(response.data)
+        ? response.data
+        : (response.data.notifications || []);
+
+      setItems(sortNotifications(next.filter((item) => item.isValid !== false)));
+      setCurrentPage(1);
+      setLoading(false);
+      setRefreshing(false);
+    } catch (err) {
+      setLoading(false);
+      setRefreshing(false);
+      if (!silent) setToast('Unable to load notifications.');
+    }
+  };
+
+  const markAsRead = async (item) => {
+    const notificationId = item?.notificationId || item?.__id;
+    if (!notificationId) return;
+
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) return;
+      const apiBaseUrl = await getApiBaseUrl();
+      await axios.patch(
+        `${apiBaseUrl}/notifications/${notificationId}/read`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      setItems((prev) =>
+        prev.map((row) =>
+          (row.notificationId || row.__id) === notificationId
+            ? { ...row, read: true, isRead: true }
+            : row
+        )
+      );
+    } catch (err) {
+      // Keep UX non-blocking if read update fails.
+    }
+  };
 
   useEffect(() => {
     let unsubscribe = () => {};
 
     const start = async () => {
-      const userRaw = await AsyncStorage.getItem('user');
-      const user = JSON.parse(userRaw || '{}');
-      if (!user?.userId) {
-        setLoading(false);
-        return;
-      }
+      setLoading(true);
+      try {
+        const userRaw = await AsyncStorage.getItem('user');
+        const user = JSON.parse(userRaw || '{}');
 
-      const q = query(
-        collection(db, 'notifications'),
-        where('userId', '==', user.userId),
-        limit(300)
-      );
-
-      unsubscribe = onSnapshot(
-        q,
-        (snap) => {
-          const next = snap.docs
-            .map((doc) => ({ ...doc.data(), __id: doc.id }))
-            .filter((item) => item.isValid !== false)
-            .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
-          setItems(next);
+        if (!user?.userId) {
+          setItems([]);
+          setToast('No active user session. Please login again.');
           setLoading(false);
-        },
-        () => {
-          setLoading(false);
-          setToast('Unable to load notifications');
+          return;
         }
-      );
+
+        const idCandidates = [...new Set([
+          user.userId,
+          String(user.userId),
+          Number.isNaN(Number(user.userId)) ? null : Number(user.userId),
+        ].filter((v) => v !== null && v !== undefined && v !== ''))];
+
+        const q = query(
+          collection(db, 'notifications'),
+          where('userId', 'in', idCandidates),
+          limit(300)
+        );
+
+        unsubscribe = onSnapshot(
+          q,
+          (snap) => {
+            const next = snap.docs
+              .map((doc) => ({ ...doc.data(), __id: doc.id }))
+              .filter((item) => item.isValid !== false)
+              .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+            setItems(next);
+            setCurrentPage(1);
+            setRefreshing(false);
+            setLoading(false);
+          },
+          () => {
+            fetchFromBackend();
+          }
+        );
+      } catch (error) {
+        fetchFromBackend();
+      }
     };
 
     start();
     return () => unsubscribe();
-  }, []);
+  }, [reloadToken]);
 
-  const visibleItems = useMemo(() => items.slice(0, visibleCount), [items, visibleCount]);
-  const canLoadMore = visibleCount < items.length;
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchFromBackend({ silent: true });
+    setReloadToken((prev) => prev + 1);
+  };
+
+  const onRetry = () => {
+    setLoading(true);
+    fetchFromBackend();
+    setReloadToken((prev) => prev + 1);
+  };
+
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const visibleItems = useMemo(() => {
+    const start = (safePage - 1) * PAGE_SIZE;
+    return items.slice(start, start + PAGE_SIZE);
+  }, [items, safePage]);
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Notifications</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.title}>Notifications</Text>
+        <Button compact mode="text" onPress={onRetry}>Retry</Button>
+      </View>
       {loading ? (
         <ActivityIndicator style={styles.loader} />
       ) : items.length === 0 ? (
-        <Text style={styles.empty}>No notifications available</Text>
+        <View style={styles.emptyWrap}>
+          <Text style={styles.empty}>No notifications available yet.</Text>
+          <Text style={styles.emptyHint}>Notifications from approvals and updates will appear here in real time.</Text>
+          <Button mode="outlined" onPress={onRetry}>Refresh Inbox</Button>
+        </View>
       ) : (
         <>
           <FlatList
             data={visibleItems}
             keyExtractor={(item, index) => item.notificationId || item.__id || String(index)}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            contentContainerStyle={styles.listContent}
             renderItem={({ item }) => (
-              <TouchableOpacity onPress={() => setSelected(item)}>
+              <TouchableOpacity
+                onPress={() => {
+                  setSelected(item);
+                  markAsRead(item);
+                }}
+              >
                 <Card style={styles.card}>
                   <Card.Content>
-                    <Text style={styles.cardTitle}>{item.title || 'Notification'}</Text>
+                    <Text style={styles.cardTitle}>
+                      {item.title || 'Notification'} {item.read || item.isRead ? '' : '(New)'}
+                    </Text>
                     <Text numberOfLines={2} style={styles.cardBody}>{item.message || 'Tap to view details'}</Text>
                     <Text style={styles.meta}>{formatDate(item.createdAt)}</Text>
                   </Card.Content>
@@ -93,11 +207,15 @@ export default function NotificationsScreen() {
               </TouchableOpacity>
             )}
           />
-          {canLoadMore && (
-            <Button mode="outlined" onPress={() => setVisibleCount((prev) => prev + PAGE_SIZE)}>
-              Load More
+          <View style={styles.paginationRow}>
+            <Button mode="outlined" disabled={safePage <= 1} onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}>
+              Prev
             </Button>
-          )}
+            <Text style={styles.pageText}>Page {safePage} / {totalPages}</Text>
+            <Button mode="outlined" disabled={safePage >= totalPages} onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}>
+              Next
+            </Button>
+          </View>
         </>
       )}
 
@@ -133,15 +251,43 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: '#1c2640',
+  },
+  headerRow: {
     marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   loader: {
     marginTop: 25,
   },
-  empty: {
+  emptyWrap: {
     marginTop: 20,
+    alignItems: 'center',
+    gap: 10,
+  },
+  empty: {
     textAlign: 'center',
     color: '#667188',
+  },
+  emptyHint: {
+    textAlign: 'center',
+    color: '#7b869d',
+    marginBottom: 4,
+  },
+  listContent: {
+    paddingBottom: 10,
+  },
+  paginationRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  pageText: {
+    color: '#5f6f86',
+    fontWeight: '600',
   },
   card: {
     marginBottom: 10,

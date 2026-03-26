@@ -1,0 +1,209 @@
+.reports-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.reports-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  background: #fff;
+  border: 1px solid #d9e2ee;
+  border-radius: 12px;
+  padding: 1rem;
+  box-shadow: 0 10px 24px rgba(17, 40, 73, 0.06);
+}
+
+.reports-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.reports-filter-group label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #4e6078;
+}
+
+.reports-filter-group select,
+.reports-filter-group input {
+  padding: 0.62rem 0.7rem;
+  border: 1px solid #cbd5e0;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.reports-refresh {
+  align-self: end;
+  border: 1px solid #abc8ea;
+  background: #e8f2fe;
+  color: #0e4f95;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0.58rem 0.9rem;
+  cursor: pointer;
+}
+
+.reports-refresh:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.reports-notice {
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  border-radius: 10px;
+  background: #fff4e5;
+  color: #9b5f13;
+  border: 1px solid #f3d7b0;
+}
+
+.reports-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.reports-graph-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.line-chart-card {
+  background: #fff;
+  border: 1px solid #d9e2ee;
+  border-radius: 12px;
+  padding: 0.8rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.line-chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.3rem;
+}
+
+.line-chart-head h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #173b63;
+}
+
+.line-chart-head span {
+  font-size: 0.78rem;
+  color: #60748f;
+}
+
+.line-chart-svg {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+.line-chart-bg {
+  fill: #f8fbff;
+}
+
+.line-chart-grid {
+  stroke: #e5edf7;
+  stroke-width: 1;
+}
+
+.line-chart-axis {
+  stroke: #a8bbd4;
+  stroke-width: 1;
+}
+
+.line-chart-label {
+  fill: #6c7f95;
+  font-size: 10px;
+}
+
+.summary-card {
+  background: #fff;
+  border: 1px solid #d9e2ee;
+  border-radius: 12px;
+  padding: 0.9rem;
+}
+
+.summary-card p {
+  margin: 0;
+  color: #60748f;
+  font-size: 0.82rem;
+}
+
+.summary-card h3 {
+  margin: 0.35rem 0 0;
+  font-size: 1.2rem;
+  color: #12263d;
+}
+
+.reports-table-wrap {
+  background: #fff;
+  border: 1px solid #d9e2ee;
+  border-radius: 12px;
+  overflow-x: auto;
+}
+
+.reports-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 860px;
+}
+
+.reports-table th,
+.reports-table td {
+  text-align: left;
+  padding: 0.75rem;
+  border-bottom: 1px solid #edf2f8;
+  font-size: 0.88rem;
+}
+
+.reports-table th {
+  background: #f7fbff;
+  color: #355070;
+  font-weight: 700;
+}
+
+.progress-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.progress-bar {
+  width: 90px;
+  height: 8px;
+  border-radius: 999px;
+  background: #e2ebf6;
+  overflow: hidden;
+}
+
+.progress-bar > div {
+  height: 100%;
+  background: linear-gradient(90deg, #2d86de 0%, #1c66b0 100%);
+}
+
+.reports-empty {
+  text-align: center;
+  color: #6f7d90;
+  padding: 1rem;
+}
+
+@media (max-width: 768px) {
+  .reports-refresh {
+    align-self: stretch;
+  }
+
+  .line-chart-card {
+    padding: 0.65rem;
+  }
+}

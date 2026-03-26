@@ -6,8 +6,67 @@ const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.disable('x-powered-by');
+
+const parseAllowedOrigins = () => {
+  const fromEnv = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (fromEnv.length) return fromEnv;
+
+  return [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:19006',
+    'http://127.0.0.1:19006',
+    'exp://localhost:19000',
+    'exp://127.0.0.1:19000',
+  ];
+};
+
+const isPrivateNetworkOrigin = (origin) => {
+  if (!origin) return false;
+  return /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/i.test(origin);
+};
+
+const isExpoOrigin = (origin) => {
+  if (!origin) return false;
+  return /^exp:\/\/.+/i.test(origin);
+};
+
+const allowedOrigins = parseAllowedOrigins();
+app.use(cors({
+  origin(origin, callback) {
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+
+    if (
+      !origin ||
+      origin === 'null' ||
+      allowedOrigins.includes(origin) ||
+      isPrivateNetworkOrigin(origin) ||
+      isExpoOrigin(origin)
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  credentials: false,
+}));
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
+
+app.use(express.json({ limit: '200kb' }));
 
 const DEFAULT_ADMIN = {
   enabled: process.env.ENABLE_DEFAULT_ADMIN_BOOTSTRAP === 'true',
@@ -94,10 +153,31 @@ const parseDate = (value) => {
   return null;
 };
 
+const normalizeDateKey = (value) => {
+  if (!value) return '';
+  const dateValue = String(value).slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) return dateValue;
+  const parsed = parseDate(value);
+  if (!parsed || Number.isNaN(parsed.getTime())) return '';
+  return parsed.toISOString().slice(0, 10);
+};
+
 const isValidSessionState = (record) => {
   const inLen = Array.isArray(record.timeIn) ? record.timeIn.length : 0;
   const outLen = Array.isArray(record.timeOut) ? record.timeOut.length : 0;
   return inLen === outLen || inLen === outLen + 1;
+};
+
+const getShiftStatusCounts = (timeIn = [], timeOut = [], shiftStatuses = [], fallbackStatus = 'pending') => {
+  const maxLen = Math.max(Array.isArray(timeIn) ? timeIn.length : 0, Array.isArray(timeOut) ? timeOut.length : 0);
+  const counts = { approved: 0, pending: 0, declined: 0 };
+  for (let i = 0; i < maxLen; i += 1) {
+    const status = shiftStatuses[i] || fallbackStatus || 'pending';
+    if (status === 'approved') counts.approved += 1;
+    else if (status === 'declined') counts.declined += 1;
+    else counts.pending += 1;
+  }
+  return counts;
 };
 
 const createNotification = async (userId, payload) => {
@@ -112,6 +192,7 @@ const createNotification = async (userId, payload) => {
     relatedDtrId: payload.relatedDtrId || null,
     relatedDate: payload.relatedDate || null,
     read: false,
+    isRead: false,
     isValid: true,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -325,7 +406,7 @@ app.get('/dtr/:studentId', verifyToken, requireDB, async (req, res) => {
     const { studentId } = req.params;
     if (req.user.role !== 'admin' && req.user.userId !== studentId) return res.status(403).json({ error: 'Access denied' });
 
-    const { month, limit = '50' } = req.query;
+    const { month, cursor, limit = '50' } = req.query;
     const pageSize = Math.min(Number(limit) || 50, 100);
 
     // Keep query index-friendly: fetch by student only, then filter month in memory.
@@ -337,6 +418,11 @@ app.get('/dtr/:studentId', verifyToken, requireDB, async (req, res) => {
       records = records.filter((r) => (r.date || '').startsWith(month));
     }
 
+    const cursorDateKey = normalizeDateKey(cursor);
+    if (cursorDateKey) {
+      records = records.filter((r) => normalizeDateKey(r.date) < cursorDateKey);
+    }
+
     // Sort by date descending on the server side to avoid composite index requirements.
     records = records
       .sort((a, b) => {
@@ -346,10 +432,13 @@ app.get('/dtr/:studentId', verifyToken, requireDB, async (req, res) => {
       })
       .slice(0, pageSize);
 
+    const lastDateKey = normalizeDateKey(records[records.length - 1]?.date);
+    const nextCursor = records.length === pageSize && lastDateKey ? lastDateKey : null;
+
     if (month || req.query.limit) {
       return res.json({
         records,
-        nextCursor: records.length === pageSize ? records[records.length - 1]?.date : null,
+        nextCursor,
       });
     }
 
@@ -360,8 +449,25 @@ app.get('/dtr/:studentId', verifyToken, requireDB, async (req, res) => {
   }
 });
 
+app.get('/dtr/detail/:dtrId', verifyToken, requireDB, async (req, res) => {
+  try {
+    const dtrDoc = await db.collection('dtr_records').doc(req.params.dtrId).get();
+    if (!dtrDoc.exists) return res.status(404).json({ error: 'DTR not found' });
+
+    const dtr = dtrDoc.data();
+    if (req.user.role !== 'admin' && req.user.userId !== dtr.studentId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    return res.json(dtr);
+  } catch (err) {
+    console.error('Failed to fetch DTR detail:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch DTR detail' });
+  }
+});
+
 app.put('/dtr/:dtrId', verifyToken, requireDB, async (req, res) => {
-  const { status, timeIn, timeOut } = req.body;
+  const { status, timeIn, timeOut, shiftStatuses } = req.body;
   const dtrRef = db.collection('dtr_records').doc(req.params.dtrId);
   const dtrDoc = await dtrRef.get();
   if (!dtrDoc.exists) return res.status(404).json({ error: 'DTR not found' });
@@ -369,10 +475,71 @@ app.put('/dtr/:dtrId', verifyToken, requireDB, async (req, res) => {
   const dtr = dtrDoc.data();
 
   if (req.user.role === 'admin') {
-    const updateData = { status, editedByAdmin: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() };
-    if (timeIn) updateData.timeIn = timeIn;
-    if (timeOut) updateData.timeOut = timeOut;
+    const prevStatus = dtr.status || 'pending';
+    const prevCounts = getShiftStatusCounts(dtr.timeIn, dtr.timeOut, dtr.shiftStatuses || [], prevStatus);
+    const updateData = { editedByAdmin: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+
+    if (typeof status === 'string' && status.trim()) updateData.status = status;
+    if (Array.isArray(timeIn)) updateData.timeIn = timeIn;
+    if (Array.isArray(timeOut)) updateData.timeOut = timeOut;
+    if (Array.isArray(shiftStatuses)) {
+      const expectedLen = Math.max(
+        Array.isArray(updateData.timeIn) ? updateData.timeIn.length : (dtr.timeIn || []).length,
+        Array.isArray(updateData.timeOut) ? updateData.timeOut.length : (dtr.timeOut || []).length
+      );
+      if (shiftStatuses.length !== expectedLen) {
+        return res.status(400).json({ error: 'shiftStatuses length must match time session count' });
+      }
+      updateData.shiftStatuses = shiftStatuses;
+    }
+
     await dtrRef.update(updateData);
+
+    const nextStatus = typeof updateData.status === 'string' ? updateData.status : prevStatus;
+    const nextCounts = getShiftStatusCounts(
+      Array.isArray(updateData.timeIn) ? updateData.timeIn : dtr.timeIn,
+      Array.isArray(updateData.timeOut) ? updateData.timeOut : dtr.timeOut,
+      Array.isArray(updateData.shiftStatuses) ? updateData.shiftStatuses : (dtr.shiftStatuses || []),
+      nextStatus
+    );
+
+    const statusChanged = nextStatus !== prevStatus;
+    const countsChanged =
+      nextCounts.approved !== prevCounts.approved ||
+      nextCounts.pending !== prevCounts.pending ||
+      nextCounts.declined !== prevCounts.declined;
+
+    if (statusChanged || countsChanged) {
+      let title = 'DTR Ticket Updated';
+      let type = 'dtr-update';
+      if (statusChanged && nextStatus === 'approved') {
+        title = 'DTR Ticket Approved';
+        type = 'dtr-approved';
+      } else if (statusChanged && nextStatus === 'declined') {
+        title = 'DTR Ticket Declined';
+        type = 'dtr-declined';
+      } else if (statusChanged && nextStatus === 'pending') {
+        title = 'DTR Ticket Returned to Pending';
+        type = 'dtr-pending';
+      }
+
+      const message = statusChanged
+        ? `Your DTR ticket for ${dtr.date} is now ${nextStatus}. Approved shifts: ${nextCounts.approved}, pending: ${nextCounts.pending}, declined: ${nextCounts.declined}.`
+        : `Your DTR shift review for ${dtr.date} was updated. Approved: ${nextCounts.approved}, pending: ${nextCounts.pending}, declined: ${nextCounts.declined}.`;
+
+      try {
+        await createNotification(dtr.studentId, {
+          title,
+          message,
+          type,
+          relatedDtrId: dtr.dtrId,
+          relatedDate: dtr.date,
+        });
+      } catch (notifErr) {
+        console.warn('Failed to create DTR review notification:', notifErr.message);
+      }
+    }
+
     return res.json({ message: 'DTR updated' });
   }
 
@@ -395,8 +562,9 @@ app.put('/dtr/:dtrId', verifyToken, requireDB, async (req, res) => {
   res.json({ message: 'Pending DTR sessions updated' });
 });
 
-app.delete('/dtr/:dtrId', verifyToken, async (req, res) => {
+app.delete('/dtr/:dtrId', verifyToken, requireDB, async (req, res) => {
   const dtrDoc = await db.collection('dtr_records').doc(req.params.dtrId).get();
+  if (!dtrDoc.exists) return res.status(404).json({ error: 'DTR not found' });
   const dtr = dtrDoc.data();
   if (req.user.role !== 'admin' && (req.user.userId !== dtr.studentId || dtr.status !== 'pending')) return res.status(403).json({ error: 'Access denied' });
   await db.collection('dtr_records').doc(req.params.dtrId).delete();
@@ -466,6 +634,7 @@ app.patch('/notifications/:notificationId/read', verifyToken, requireDB, async (
 
   await notificationRef.update({
     read: true,
+    isRead: true,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
@@ -476,6 +645,9 @@ const PORT = process.env.PORT || 3000;
 
 const startServer = async () => {
   try {
+    if (!process.env.JWT_SECRET || process.env.JWT_SECRET.trim().length < 16) {
+      throw new Error('JWT_SECRET is missing or too short. Set a strong JWT secret in backend/.env before starting the API.');
+    }
     await ensureDefaultAdmin();
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
   } catch (err) {
