@@ -625,7 +625,6 @@ function DTRReports() {
           <thead>
             <tr>
               <th>Student</th>
-              <th>Username</th>
               <th>DTR Days</th>
               <th>Total Time</th>
               <th>Approved</th>
@@ -638,7 +637,6 @@ function DTRReports() {
             {rows.map((row) => (
               <tr key={row.userId}>
                 <td>{row.studentName}</td>
-                <td>{row.username}</td>
                 <td>{row.recordsCount}</td>
                 <td>{formatMinutes(row.totalMinutes)}</td>
                 <td>{row.approvedShifts}</td>
@@ -656,7 +654,7 @@ function DTRReports() {
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan="8" className="reports-empty">No report data available for this period.</td>
+                <td colSpan="7" className="reports-empty">No report data available for this period.</td>
               </tr>
             )}
           </tbody>

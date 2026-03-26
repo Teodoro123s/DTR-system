@@ -205,7 +205,7 @@
 .reports-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 860px;
+  min-width: 760px;
 }
 
 .reports-table th,

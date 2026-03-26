@@ -257,7 +257,6 @@ export default function NotificationsScreen() {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{selected?.title || 'Notification'}</Text>
             <Text style={styles.modalBody}>{selected?.message || '-'}</Text>
-            <Text style={styles.modalMeta}>Related DTR: {selected?.relatedDtrId || '-'}</Text>
             {showRelatedDate ? <Text style={styles.modalMeta}>Date: {selectedRelatedDate}</Text> : null}
             {selectedCreatedAt ? <Text style={styles.modalMeta}>Timestamp: {selectedCreatedAt}</Text> : null}
             <Button style={styles.closeBtn} mode="contained" onPress={() => setSelected(null)}>
