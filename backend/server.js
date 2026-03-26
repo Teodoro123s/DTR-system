@@ -162,6 +162,9 @@ const normalizeDateKey = (value) => {
   return parsed.toISOString().slice(0, 10);
 };
 
+const sameUserId = (a, b) => String(a ?? '') === String(b ?? '');
+const MAX_PAGE_SIZE = 10;
+
 const isValidSessionState = (record) => {
   const inLen = Array.isArray(record.timeIn) ? record.timeIn.length : 0;
   const outLen = Array.isArray(record.timeOut) ? record.timeOut.length : 0;
@@ -180,14 +183,21 @@ const getShiftStatusCounts = (timeIn = [], timeOut = [], shiftStatuses = [], fal
   return counts;
 };
 
+const clampText = (value, maxLen) => {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, Math.max(0, maxLen - 1)).trim()}...`;
+};
+
 const createNotification = async (userId, payload) => {
   if (!db || !userId) return null;
   const notificationId = db.collection('notifications').doc().id;
   const record = {
     notificationId,
     userId,
-    title: payload.title || 'DTR Update',
-    message: payload.message || '',
+    title: clampText(payload.title || 'DTR Update', 70),
+    message: clampText(payload.message || '', 180),
     type: payload.type || 'info',
     relatedDtrId: payload.relatedDtrId || null,
     relatedDate: payload.relatedDate || null,
@@ -201,7 +211,34 @@ const createNotification = async (userId, payload) => {
   return record;
 };
 
+const notifyAdmins = async (payload, options = {}) => {
+  if (!db) return;
+  const excludeUserId = options.excludeUserId ? String(options.excludeUserId) : null;
+
+  const adminsSnapshot = await db.collection('users').where('role', '==', 'admin').get();
+  if (adminsSnapshot.empty) return;
+
+  const jobs = adminsSnapshot.docs
+    .map((doc) => doc.data())
+    .filter((adminUser) => adminUser?.userId && String(adminUser.userId) !== excludeUserId)
+    .map((adminUser) => createNotification(adminUser.userId, payload));
+
+  if (jobs.length) {
+    await Promise.all(jobs);
+  }
+};
+
+const getUserDisplayName = (user, fallback = 'User') => {
+  if (!user) return fallback;
+  const full = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+  return full || user.username || user.userId || fallback;
+};
+
 // Routes
+app.get('/health', (req, res) => {
+  res.json({ ok: true, service: 'dtr-backend' });
+});
+
 app.post('/login', async (req, res) => {
   if (!db) return res.status(503).json({ error: 'Database not configured. Upload firebase-service-account.json to backend folder.' });
   const { username, password } = req.body;
@@ -231,22 +268,52 @@ app.post('/login', async (req, res) => {
 
 app.post('/students', verifyToken, requireDB, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-  const { firstName, lastName } = req.body;
-  const username = `user-${lastName}`;
-  const password = `pass-${lastName}`;
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const userId = db.collection('users').doc().id;
-  await db.collection('users').doc(userId).set({
-    userId,
-    firstName,
-    lastName,
-    username,
-    password: hashedPassword,
-    role: 'student',
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp()
-  });
-  res.json({ userId, username, password });
+  try {
+    const { firstName, lastName } = req.body;
+    const username = `user-${lastName}`;
+    const password = `pass-${lastName}`;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const userId = db.collection('users').doc().id;
+
+    await db.collection('users').doc(userId).set({
+      userId,
+      firstName,
+      lastName,
+      username,
+      password: hashedPassword,
+      role: 'student',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    const studentName = `${firstName || ''} ${lastName || ''}`.trim() || username || userId;
+
+    // Student-facing notification: confirms account provisioning by admin.
+    try {
+      await createNotification(userId, {
+        title: 'Account Created',
+        message: `Your account was created by an administrator. Username: ${username}.`,
+        type: 'account-created',
+      });
+    } catch (notifErr) {
+      console.warn('Failed to create student account notification:', notifErr.message);
+    }
+
+    // Admin activity feed notification.
+    try {
+      await notifyAdmins({
+        title: 'Student Account Created',
+        message: `${studentName} was added by an administrator.`,
+        type: 'admin-student-create',
+      });
+    } catch (adminNotifErr) {
+      console.warn('Failed to create admin student-create notification:', adminNotifErr.message);
+    }
+
+    res.json({ userId, username, password });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to create student' });
+  }
 });
 
 app.get('/students', verifyToken, requireDB, async (req, res) => {
@@ -258,25 +325,75 @@ app.get('/students', verifyToken, requireDB, async (req, res) => {
 
 app.put('/students/:id', verifyToken, requireDB, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-  const { firstName, lastName, resetPassword, resetCredentials } = req.body;
-  const updateData = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
-  if (firstName) updateData.firstName = firstName;
-  if (lastName) updateData.lastName = lastName;
-  if (resetPassword || resetCredentials) {
-    const userDoc = await db.collection('users').doc(req.params.id).get();
-    if (!userDoc.exists) return res.status(404).json({ error: 'Student not found' });
-    const user = userDoc.data();
-    const surname = lastName || user.lastName;
-    const username = `user-${surname}`;
-    const password = `pass-${surname}`;
-    if (resetCredentials) {
-      updateData.username = username;
+  try {
+    const { firstName, lastName, resetPassword, resetCredentials } = req.body;
+    const studentRef = db.collection('users').doc(req.params.id);
+    const studentDoc = await studentRef.get();
+    if (!studentDoc.exists) return res.status(404).json({ error: 'Student not found' });
+
+    const currentStudent = studentDoc.data();
+    const updateData = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+
+    if (firstName) updateData.firstName = firstName;
+    if (lastName) updateData.lastName = lastName;
+
+    let resetUsername = null;
+    if (resetPassword || resetCredentials) {
+      const surname = lastName || currentStudent.lastName;
+      resetUsername = `user-${surname}`;
+      const password = `pass-${surname}`;
+      if (resetCredentials) {
+        updateData.username = resetUsername;
+      }
+      updateData.password = await bcrypt.hash(password, 10);
+      updateData.mustRelogin = true;
     }
-    updateData.password = await bcrypt.hash(password, 10);
-    updateData.mustRelogin = true;
+
+    await studentRef.update(updateData);
+
+    const nextStudent = {
+      ...currentStudent,
+      ...updateData,
+      userId: req.params.id,
+    };
+    const studentName = getUserDisplayName(nextStudent, req.params.id);
+
+    try {
+      const message = resetCredentials
+        ? `Your account credentials were reset by an administrator. New username: ${resetUsername}.`
+        : resetPassword
+          ? 'Your account password was reset by an administrator.'
+          : 'Your account profile was updated by an administrator.';
+
+      await createNotification(req.params.id, {
+        title: resetCredentials || resetPassword ? 'Account Credentials Updated' : 'Account Updated',
+        message,
+        type: resetCredentials || resetPassword ? 'account-credentials-reset' : 'account-updated',
+      });
+    } catch (notifErr) {
+      console.warn('Failed to create student-update notification:', notifErr.message);
+    }
+
+    try {
+      const actionLabel = resetCredentials
+        ? 'reset student credentials for'
+        : resetPassword
+          ? 'reset student password for'
+          : 'updated student profile for';
+
+      await notifyAdmins({
+        title: 'Student Account Updated',
+        message: `An administrator ${actionLabel} ${studentName}.`,
+        type: 'admin-student-update',
+      });
+    } catch (adminNotifErr) {
+      console.warn('Failed to create admin student-update notification:', adminNotifErr.message);
+    }
+
+    res.json({ message: 'Student updated', forceRelogin: !!(resetPassword || resetCredentials) });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to update student' });
   }
-  await db.collection('users').doc(req.params.id).update(updateData);
-  res.json({ message: 'Student updated', forceRelogin: !!(resetPassword || resetCredentials) });
 });
 
 app.put('/me/credentials', verifyToken, requireDB, async (req, res) => {
@@ -327,8 +444,30 @@ app.put('/me/credentials', verifyToken, requireDB, async (req, res) => {
 
 app.delete('/students/:id', verifyToken, requireDB, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-  await db.collection('users').doc(req.params.id).delete();
-  res.json({ message: 'Student deleted' });
+  try {
+    const studentRef = db.collection('users').doc(req.params.id);
+    const studentDoc = await studentRef.get();
+    if (!studentDoc.exists) return res.status(404).json({ error: 'Student not found' });
+
+    const student = studentDoc.data();
+    const studentName = getUserDisplayName(student, req.params.id);
+
+    await studentRef.delete();
+
+    try {
+      await notifyAdmins({
+        title: 'Student Account Deleted',
+        message: `${studentName} was removed by an administrator.`,
+        type: 'admin-student-delete',
+      });
+    } catch (adminNotifErr) {
+      console.warn('Failed to create admin student-delete notification:', adminNotifErr.message);
+    }
+
+    res.json({ message: 'Student deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to delete student' });
+  }
 });
 
 app.post('/dtr', verifyToken, requireDB, async (req, res) => {
@@ -398,16 +537,35 @@ app.post('/dtr', verifyToken, requireDB, async (req, res) => {
     relatedDate: date,
   });
 
+  try {
+    const studentDoc = await db.collection('users').doc(studentId).get();
+    const studentData = studentDoc.exists ? studentDoc.data() : null;
+    const studentName = studentData
+      ? `${studentData.firstName || ''} ${studentData.lastName || ''}`.trim() || studentData.username || studentId
+      : studentId;
+
+    await notifyAdmins({
+      title: action === 'timeIn' ? 'Student Time In Logged' : 'Student Time Out Logged',
+      message: `${studentName} ${action === 'timeIn' ? 'timed in' : 'timed out'} on ${date}.`,
+      type: action === 'timeIn' ? 'admin-student-time-in' : 'admin-student-time-out',
+      relatedDtrId: dtrDoc.dtrId,
+      relatedDate: date,
+    });
+  } catch (adminNotifErr) {
+    console.warn('Failed to create admin DTR activity notification:', adminNotifErr.message);
+  }
+
   res.json({ message: 'DTR updated' });
 });
 
 app.get('/dtr/:studentId', verifyToken, requireDB, async (req, res) => {
   try {
     const { studentId } = req.params;
-    if (req.user.role !== 'admin' && req.user.userId !== studentId) return res.status(403).json({ error: 'Access denied' });
+    if (req.user.role !== 'admin' && !sameUserId(req.user.userId, studentId)) return res.status(403).json({ error: 'Access denied' });
 
-    const { month, cursor, limit = '50' } = req.query;
-    const pageSize = Math.min(Number(limit) || 50, 100);
+    const { month, cursor, limit = String(MAX_PAGE_SIZE) } = req.query;
+    const requestedLimit = Number(limit) || MAX_PAGE_SIZE;
+    const pageSize = Math.min(Math.max(requestedLimit, 1), MAX_PAGE_SIZE);
 
     // Keep query index-friendly: fetch by student only, then filter month in memory.
     // Do not apply a low Firestore limit here; it can hide today's record and desync UI state.
@@ -455,7 +613,7 @@ app.get('/dtr/detail/:dtrId', verifyToken, requireDB, async (req, res) => {
     if (!dtrDoc.exists) return res.status(404).json({ error: 'DTR not found' });
 
     const dtr = dtrDoc.data();
-    if (req.user.role !== 'admin' && req.user.userId !== dtr.studentId) {
+    if (req.user.role !== 'admin' && !sameUserId(req.user.userId, dtr.studentId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -544,7 +702,7 @@ app.put('/dtr/:dtrId', verifyToken, requireDB, async (req, res) => {
   }
 
   // Student can only update own pending record and only time arrays.
-  if (req.user.userId !== dtr.studentId) return res.status(403).json({ error: 'Access denied' });
+  if (!sameUserId(req.user.userId, dtr.studentId)) return res.status(403).json({ error: 'Access denied' });
   if (dtr.status !== 'pending') return res.status(403).json({ error: 'Only pending records can be edited' });
   if (!Array.isArray(timeIn) || !Array.isArray(timeOut)) {
     return res.status(400).json({ error: 'timeIn and timeOut arrays are required' });
@@ -566,7 +724,7 @@ app.delete('/dtr/:dtrId', verifyToken, requireDB, async (req, res) => {
   const dtrDoc = await db.collection('dtr_records').doc(req.params.dtrId).get();
   if (!dtrDoc.exists) return res.status(404).json({ error: 'DTR not found' });
   const dtr = dtrDoc.data();
-  if (req.user.role !== 'admin' && (req.user.userId !== dtr.studentId || dtr.status !== 'pending')) return res.status(403).json({ error: 'Access denied' });
+  if (req.user.role !== 'admin' && (!sameUserId(req.user.userId, dtr.studentId) || dtr.status !== 'pending')) return res.status(403).json({ error: 'Access denied' });
   await db.collection('dtr_records').doc(req.params.dtrId).delete();
 
   const notifSnapshot = await db.collection('notifications').where('relatedDtrId', '==', req.params.dtrId).get();
@@ -582,63 +740,106 @@ app.delete('/dtr/:dtrId', verifyToken, requireDB, async (req, res) => {
     await batch.commit();
   }
 
+  if (req.user.role !== 'admin') {
+    try {
+      const studentDoc = await db.collection('users').doc(dtr.studentId).get();
+      const studentData = studentDoc.exists ? studentDoc.data() : null;
+      const studentName = studentData
+        ? `${studentData.firstName || ''} ${studentData.lastName || ''}`.trim() || studentData.username || dtr.studentId
+        : dtr.studentId;
+
+      await notifyAdmins({
+        title: 'Pending DTR Deleted by Student',
+        message: `${studentName} deleted a pending DTR record for ${dtr.date}.`,
+        type: 'admin-dtr-delete',
+        relatedDtrId: dtr.dtrId,
+        relatedDate: dtr.date,
+      });
+    } catch (adminNotifErr) {
+      console.warn('Failed to create admin delete notification:', adminNotifErr.message);
+    }
+  }
+
   res.json({ message: 'DTR deleted' });
 });
 
 app.get('/notifications/:userId', verifyToken, requireDB, async (req, res) => {
-  const { userId } = req.params;
-  if (req.user.userId !== userId) return res.status(403).json({ error: 'Access denied' });
+  try {
+    const { userId } = req.params;
+    const targetUserId = req.user.role === 'admin' ? userId : req.user.userId;
 
-  const { limit = '20', cursor } = req.query;
-  const pageSize = Math.min(Number(limit) || 20, 100);
-  let queryRef = db
-    .collection('notifications')
-    .where('userId', '==', userId)
-    .orderBy('createdAt', 'desc');
+    const { limit = String(MAX_PAGE_SIZE), cursor } = req.query;
+    const requestedLimit = Number(limit) || MAX_PAGE_SIZE;
+    const pageSize = Math.min(Math.max(requestedLimit, 1), MAX_PAGE_SIZE);
+    const snapshot = await db
+      .collection('notifications')
+      .where('userId', '==', String(targetUserId))
+      .get();
 
-  if (cursor && /^\d+$/.test(cursor)) {
-    const cursorDate = new Date(Number(cursor));
-    queryRef = queryRef.startAfter(cursorDate);
-  }
+    let notifications = snapshot.docs
+      .map(doc => doc.data())
+      .filter(item => item.isValid !== false)
+      .sort((a, b) => {
+        const aMs = parseDate(a.createdAt)?.getTime() || 0;
+        const bMs = parseDate(b.createdAt)?.getTime() || 0;
+        return bMs - aMs;
+      });
 
-  const snapshot = await queryRef.limit(pageSize).get();
-  const notifications = snapshot.docs
-    .map(doc => doc.data())
-    .filter(item => item.isValid !== false);
+    if (cursor && /^\d+$/.test(cursor)) {
+      const cursorMs = Number(cursor);
+      notifications = notifications.filter((item) => {
+        const createdMs = parseDate(item.createdAt)?.getTime() || 0;
+        return createdMs < cursorMs;
+      });
+    }
 
-  if (req.query.limit || cursor) {
-    const lastCreatedAt = notifications[notifications.length - 1]?.createdAt;
-    const lastDate = parseDate(lastCreatedAt);
-    return res.json({
-      notifications,
-      nextCursor: notifications.length === pageSize && lastDate ? String(lastDate.getTime()) : null,
+    notifications = notifications.slice(0, pageSize);
+
+    if (req.query.limit || cursor) {
+      const lastCreatedAt = notifications[notifications.length - 1]?.createdAt;
+      const lastDate = parseDate(lastCreatedAt);
+      return res.json({
+        notifications,
+        nextCursor: notifications.length === pageSize && lastDate ? String(lastDate.getTime()) : null,
+      });
+    }
+
+    res.json(notifications);
+  } catch (err) {
+    console.error('Failed to fetch notifications:', err.message);
+    return res.status(500).json({
+      error: 'Failed to fetch notifications',
+      ...(process.env.NODE_ENV !== 'production' ? { details: err.message } : {}),
     });
   }
-
-  res.json(notifications);
 });
 
 app.patch('/notifications/:notificationId/read', verifyToken, requireDB, async (req, res) => {
-  const { notificationId } = req.params;
-  const notificationRef = db.collection('notifications').doc(notificationId);
-  const notificationDoc = await notificationRef.get();
+  try {
+    const { notificationId } = req.params;
+    const notificationRef = db.collection('notifications').doc(notificationId);
+    const notificationDoc = await notificationRef.get();
 
-  if (!notificationDoc.exists) {
-    return res.status(404).json({ error: 'Notification not found' });
+    if (!notificationDoc.exists) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+
+    const notification = notificationDoc.data();
+    if (!sameUserId(req.user.userId, notification.userId) && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    await notificationRef.update({
+      read: true,
+      isRead: true,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    res.json({ message: 'Notification marked as read' });
+  } catch (err) {
+    console.error('Failed to mark notification as read:', err.message);
+    return res.status(500).json({ error: 'Failed to update notification' });
   }
-
-  const notification = notificationDoc.data();
-  if (req.user.userId !== notification.userId) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
-  await notificationRef.update({
-    read: true,
-    isRead: true,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  res.json({ message: 'Notification marked as read' });
 });
 
 const PORT = process.env.PORT || 3000;
@@ -649,7 +850,16 @@ const startServer = async () => {
       throw new Error('JWT_SECRET is missing or too short. Set a strong JWT secret in backend/.env before starting the API.');
     }
     await ensureDefaultAdmin();
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+    const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    server.on('error', (err) => {
+      if (err?.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} is already in use. Stop the other backend process or set PORT in backend/.env.`);
+        process.exit(1);
+      }
+      console.error('Server error:', err.message || err);
+      process.exit(1);
+    });
   } catch (err) {
     console.error('Failed to start server:', err.message);
     process.exit(1);

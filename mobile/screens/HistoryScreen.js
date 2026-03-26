@@ -8,8 +8,8 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
 import { getApiBaseUrl } from '../utils/api';
-const PAGE_SIZE = 40;
 const LIST_PAGE_SIZE = 10;
+const API_PAGE_SIZE = 10;
 
 const getStatusColor = (status) => {
   switch (status) {
@@ -57,6 +57,11 @@ const formatMinutes = (mins) => {
   return `${h}h ${m}m`;
 };
 
+const toStatusLabel = (status) => {
+  if (!status) return 'Pending';
+  return `${String(status).charAt(0).toUpperCase()}${String(status).slice(1)}`;
+};
+
 export default function HistoryScreen() {
   const [records, setRecords] = useState([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
@@ -87,7 +92,7 @@ export default function HistoryScreen() {
       }
 
       const params = new URLSearchParams();
-      params.set('limit', String(PAGE_SIZE));
+      params.set('limit', String(API_PAGE_SIZE));
       params.set('month', explicitMonth);
 
       if (!reset && cursor) {
@@ -143,7 +148,7 @@ export default function HistoryScreen() {
 
     do {
       const params = new URLSearchParams();
-      params.set('limit', '500');
+      params.set('limit', String(API_PAGE_SIZE));
       params.set('month', monthValue);
       if (nextCursor) params.set('cursor', nextCursor);
 
@@ -389,7 +394,7 @@ export default function HistoryScreen() {
           <View style={styles.cardHeader}>
             <Text style={styles.cardDate}>{item.date}</Text>
             <Chip compact style={{ backgroundColor: getStatusColor(item.status) }} textStyle={{ color: '#fff' }}>
-              {item.status}
+              {toStatusLabel(item.status)}
             </Chip>
           </View>
           <Text style={styles.sessionCount}>{pairTimes(item).length} session(s)</Text>
@@ -481,16 +486,37 @@ export default function HistoryScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
       <Text style={styles.title}>My Records</Text>
+      <Text style={styles.screenHint}>Tap any record card to view full details.</Text>
 
-      <SegmentedButtons
-        value={viewMode}
-        onValueChange={setViewMode}
-        style={styles.viewMode}
-        buttons={[
-          { value: 'calendar', label: 'Calendar View' },
-          { value: 'list', label: 'List View' },
-        ]}
-      />
+      <View style={styles.controlsPanel}>
+        <Text style={styles.panelTitle}>View Options</Text>
+        <SegmentedButtons
+          value={viewMode}
+          onValueChange={setViewMode}
+          style={styles.viewMode}
+          buttons={[
+            { value: 'calendar', label: 'Calendar' },
+            { value: 'list', label: 'List' },
+          ]}
+        />
+
+        <View style={styles.monthControls}>
+          <Button compact onPress={() => changeMonth(-1)}>Previous</Button>
+          <Text style={styles.monthLabel}>{month}</Text>
+          <Button compact onPress={() => changeMonth(1)}>Next</Button>
+        </View>
+
+        <Button
+          mode="contained"
+          icon="download"
+          style={styles.exportButton}
+          loading={exporting}
+          disabled={exporting}
+          onPress={openReviewBeforeDownload}
+        >
+          {exporting ? 'Preparing...' : 'Review & Download Monthly Report'}
+        </Button>
+      </View>
 
       <Card style={styles.overallTimeCard}>
         <Card.Content>
@@ -512,28 +538,11 @@ export default function HistoryScreen() {
         </Card.Content>
       </Card>
 
-      <View style={styles.summaryRow}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.summaryRow}>
         <Chip compact icon="check-circle" style={styles.approvedChip}>Approved: {statusSummary.approved || 0}</Chip>
         <Chip compact icon="clock-outline" style={styles.pendingChip}>Pending: {statusSummary.pending || 0}</Chip>
         <Chip compact icon="close-circle" style={styles.declinedChip}>Declined: {statusSummary.declined || 0}</Chip>
-      </View>
-
-      <View style={styles.monthControls}>
-        <Button compact onPress={() => changeMonth(-1)}>Prev</Button>
-        <Text style={styles.monthLabel}>{month}</Text>
-        <Button compact onPress={() => changeMonth(1)}>Next</Button>
-      </View>
-
-      <Button
-        mode="contained"
-        icon="download"
-        style={styles.exportButton}
-        loading={exporting}
-        disabled={exporting}
-        onPress={openReviewBeforeDownload}
-      >
-        {exporting ? 'Preparing Review...' : `Review ${month} Download`}
-      </Button>
+      </ScrollView>
 
       {viewMode === 'calendar' ? (
         <>
@@ -595,29 +604,38 @@ export default function HistoryScreen() {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <ScrollView contentContainerStyle={styles.modalScrollContent}>
-            <Text style={styles.modalTitle}>DTR Detail</Text>
+            <Text style={styles.modalTitle}>Record Details</Text>
             {detailLoading && <ActivityIndicator style={styles.loaderInline} />}
-            <Text style={styles.modalInfo}>Date: {selectedRecord?.date || '-'}</Text>
-            <Text style={styles.modalInfo}>Status: {selectedRecord?.status || '-'}</Text>
+            <View style={styles.detailMetaRow}>
+              <View style={styles.metaPill}>
+                <Text style={styles.metaPillLabel}>Date</Text>
+                <Text style={styles.metaPillValue}>{selectedRecord?.date || '-'}</Text>
+              </View>
+              <View style={styles.metaPill}>
+                <Text style={styles.metaPillLabel}>Approval</Text>
+                <Text style={styles.metaPillValue}>{toStatusLabel(selectedRecord?.status)}</Text>
+              </View>
+            </View>
             {pairTimes(selectedRecord || {}).map((pair) => (
               <View key={`modal-${pair.index}`} style={styles.sessionBlock}>
-                <Text style={styles.modalInfo}>Time In {pair.index}: {formatTimeValue(pair.timeIn)}</Text>
-                <Text style={styles.modalInfo}>Time Out {pair.index}: {formatTimeValue(pair.timeOut)}</Text>
+                <Text style={styles.sessionTitle}>Log {pair.index}</Text>
+                <Text style={styles.modalInfo}>Time In: {formatTimeValue(pair.timeIn)}</Text>
+                <Text style={styles.modalInfo}>Time Out: {formatTimeValue(pair.timeOut)}</Text>
                 {selectedRecord?.status === 'pending' && (
                   <View style={styles.sessionActionRow}>
                     <Button compact mode="outlined" onPress={() => confirmDeletePair(selectedRecord, pair.index - 1)}>
-                      Delete Session {pair.index}
+                      Remove Log
                     </Button>
                   </View>
                 )}
               </View>
             ))}
             {selectedRecord?.status === 'pending' && (
-              <Button mode="outlined" style={styles.deleteBtn} onPress={() => confirmDelete(selectedRecord)}>
-                Delete Pending Record
+              <Button compact mode="outlined" style={styles.deleteBtn} onPress={() => confirmDelete(selectedRecord)}>
+                Delete Record
               </Button>
             )}
-            <Button mode="contained" onPress={() => setSelectedRecord(null)}>Close</Button>
+            <Button compact mode="contained" style={styles.closeDetailBtn} onPress={() => setSelectedRecord(null)}>Done</Button>
             </ScrollView>
           </View>
         </View>
@@ -626,8 +644,8 @@ export default function HistoryScreen() {
       <Modal visible={reviewVisible} transparent animationType="slide" onRequestClose={() => setReviewVisible(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Review Monthly Download ({month})</Text>
-            <Text style={styles.modalInfo}>Check the table before downloading.</Text>
+            <Text style={styles.modalTitle}>Review Monthly Report ({month})</Text>
+            <Text style={styles.modalInfo}>Please review this table before download.</Text>
             <ScrollView horizontal style={styles.reviewTableWrap}>
               <View>
                 <View style={[styles.tableRow, styles.tableHeaderRow]}>
@@ -659,7 +677,7 @@ export default function HistoryScreen() {
                 Cancel
               </Button>
               <Button mode="contained" loading={exporting} disabled={exporting || reviewRows.length === 0} onPress={confirmDownloadFromReview}>
-                Download Excel
+                Download File
               </Button>
             </View>
           </View>
@@ -683,17 +701,36 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: '#1c2640',
+    marginBottom: 3,
+  },
+  screenHint: {
+    color: '#6b7891',
     marginBottom: 10,
+    fontSize: 12,
   },
   viewMode: {
     marginBottom: 8,
   },
   pageScrollContent: {
-    paddingBottom: 16,
+    paddingBottom: 24,
+  },
+  controlsPanel: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#dce5f4',
+    padding: 10,
+    marginBottom: 10,
+  },
+  panelTitle: {
+    color: '#344c71',
+    fontWeight: '700',
+    marginBottom: 8,
+    fontSize: 13,
   },
   overallTimeCard: {
     borderRadius: 12,
-    marginBottom: 8,
+    marginBottom: 10,
     backgroundColor: '#f0f6ff',
   },
   overallTitle: {
@@ -730,20 +767,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
+    paddingHorizontal: 2,
   },
   monthLabel: {
     fontWeight: '700',
   },
   exportButton: {
-    marginBottom: 10,
+    marginTop: 4,
     borderRadius: 10,
   },
   summaryRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 8,
+    paddingBottom: 8,
   },
   approvedChip: {
     backgroundColor: '#e7f6ec',
@@ -763,7 +800,8 @@ const styles = StyleSheet.create({
   },
   subTitle: {
     fontWeight: '700',
-    marginBottom: 6,
+    marginBottom: 8,
+    color: '#2d3f5f',
   },
   card: {
     marginBottom: 10,
@@ -773,7 +811,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   listSection: {
-    paddingBottom: 10,
+    paddingBottom: 12,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -825,19 +863,49 @@ const styles = StyleSheet.create({
     padding: 16,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
-    maxHeight: '85%',
+    maxHeight: '82%',
   },
   modalScrollContent: {
-    paddingBottom: 6,
+    paddingBottom: 8,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    marginBottom: 8,
+    marginBottom: 10,
+  },
+  detailMetaRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  metaPill: {
+    flex: 1,
+    backgroundColor: '#f3f7ff',
+    borderWidth: 1,
+    borderColor: '#dbe7fb',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  metaPillLabel: {
+    color: '#61708b',
+    fontSize: 11,
+    marginBottom: 2,
+  },
+  metaPillValue: {
+    color: '#233758',
+    fontWeight: '700',
+    fontSize: 13,
   },
   modalInfo: {
-    marginBottom: 4,
+    marginBottom: 2,
     color: '#4f5d77',
+    fontSize: 13,
+  },
+  sessionTitle: {
+    color: '#223654',
+    fontWeight: '700',
+    marginBottom: 4,
   },
   loaderInline: {
     marginBottom: 8,
@@ -846,17 +914,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e8edf6',
     borderRadius: 10,
-    padding: 8,
+    padding: 10,
     marginBottom: 8,
+    backgroundColor: '#fcfdff',
   },
   sessionActionRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 6,
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    marginTop: 8,
   },
   deleteBtn: {
-    marginTop: 8,
+    marginTop: 2,
     marginBottom: 8,
+    alignSelf: 'flex-end',
+  },
+  closeDetailBtn: {
+    alignSelf: 'flex-end',
+    borderRadius: 8,
+    minWidth: 86,
   },
   reviewTableWrap: {
     marginTop: 8,

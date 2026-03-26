@@ -7,6 +7,8 @@ import { collection, limit, onSnapshot, query, where } from 'firebase/firestore'
 import { db } from '../firebaseConfig';
 import { getApiBaseUrl } from '../utils/api';
 
+const API_PAGE_SIZE = 10;
+
 const toMillis = (value) => {
   if (!value) return 0;
   if (typeof value === 'string') return new Date(value).getTime();
@@ -24,6 +26,8 @@ const formatDate = (value) => {
 const sortNotifications = (list = []) => {
   return [...list].sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 };
+
+const normalizeId = (value) => String(value ?? '').trim();
 
 const parseDate = (value) => {
   const ms = toMillis(value);
@@ -70,12 +74,12 @@ export default function DashboardScreen({ navigation }) {
 
   const fetchNotificationsFromBackend = async (userIdParam) => {
     try {
-      const activeUserId = userIdParam || user?.userId;
+      const activeUserId = normalizeId(userIdParam || user?.userId);
       const token = await AsyncStorage.getItem('token');
       if (!activeUserId || !token) return;
 
       const apiBaseUrl = await getApiBaseUrl();
-      const response = await axios.get(`${apiBaseUrl}/notifications/${activeUserId}?limit=50`, {
+      const response = await axios.get(`${apiBaseUrl}/notifications/${activeUserId}?limit=${API_PAGE_SIZE}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -129,17 +133,12 @@ export default function DashboardScreen({ navigation }) {
       const userData = await AsyncStorage.getItem('user');
       const parsedUser = JSON.parse(userData || '{}');
       setUser(parsedUser);
+      const parsedUserId = normalizeId(parsedUser?.userId);
 
-      if (parsedUser?.userId) {
-        const idCandidates = [...new Set([
-          parsedUser.userId,
-          String(parsedUser.userId),
-          Number.isNaN(Number(parsedUser.userId)) ? null : Number(parsedUser.userId),
-        ].filter((v) => v !== null && v !== undefined && v !== ''))];
-
+      if (parsedUserId) {
         const q = query(
           collection(db, 'notifications'),
-          where('userId', 'in', idCandidates),
+          where('userId', '==', parsedUserId),
           limit(200)
         );
 
@@ -160,16 +159,20 @@ export default function DashboardScreen({ navigation }) {
               }
               lastNotificationIdRef.current = top5[0].notificationId;
             }
+
+            if (!top5.length) {
+              fetchNotificationsFromBackend(parsedUserId);
+            }
           },
           () => {
-            fetchNotificationsFromBackend(parsedUser.userId);
+            fetchNotificationsFromBackend(parsedUserId);
           }
         );
       } else {
         setLoadingNotifications(false);
       }
 
-      await refreshSessionStatus(parsedUser?.userId);
+      await refreshSessionStatus(parsedUserId);
     };
 
     boot();
@@ -189,11 +192,26 @@ export default function DashboardScreen({ navigation }) {
 
       const currentMonth = new Date().toISOString().slice(0, 7);
       const apiBaseUrl = await getApiBaseUrl();
-      const response = await axios.get(`${apiBaseUrl}/dtr/${activeUserId}?month=${currentMonth}&limit=60`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
 
-      const records = Array.isArray(response.data) ? response.data : response.data.records || [];
+      const records = [];
+      let nextCursor = null;
+      do {
+        const params = new URLSearchParams();
+        params.set('month', currentMonth);
+        params.set('limit', String(API_PAGE_SIZE));
+        if (nextCursor) params.set('cursor', nextCursor);
+
+        const response = await axios.get(`${apiBaseUrl}/dtr/${activeUserId}?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const payload = Array.isArray(response.data)
+          ? { records: response.data, nextCursor: null }
+          : response.data;
+
+        records.push(...(payload.records || []));
+        nextCursor = payload.nextCursor || null;
+      } while (nextCursor);
       const today = new Date().toISOString().slice(0, 10);
       const todayRecord = records.find((r) => r.date === today);
 

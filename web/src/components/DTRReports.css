@@ -22,6 +22,44 @@
   gap: 0.35rem;
 }
 
+.reports-period-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #cbd8ea;
+  border-radius: 10px;
+  overflow: hidden;
+  width: fit-content;
+  background: #f8fbff;
+}
+
+.period-btn {
+  border: none;
+  background: transparent;
+  color: #365273;
+  font-weight: 700;
+  font-size: 0.84rem;
+  padding: 0.5rem 0.8rem;
+  cursor: pointer;
+  min-width: 74px;
+}
+
+.period-btn:not(:last-child) {
+  border-right: 1px solid #d7e2f2;
+}
+
+.period-btn.active {
+  background: #1a66ba;
+  color: #fff;
+}
+
+.period-btn:hover {
+  background: #eaf3ff;
+}
+
+.period-btn.active:hover {
+  background: #1459a8;
+}
+
 .reports-filter-group label {
   font-size: 0.82rem;
   font-weight: 600;
@@ -69,9 +107,10 @@
 
 .reports-graph-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 0.75rem;
   min-width: 0;
+  align-items: stretch;
 }
 
 .line-chart-card {
@@ -81,6 +120,9 @@
   padding: 0.8rem;
   min-width: 0;
   overflow: hidden;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
 }
 
 .line-chart-head {
@@ -106,6 +148,7 @@
   max-width: 100%;
   height: auto;
   display: block;
+  margin-top: auto;
 }
 
 .line-chart-bg {
@@ -125,6 +168,12 @@
 .line-chart-label {
   fill: #6c7f95;
   font-size: 10px;
+}
+
+.line-chart-y-label {
+  fill: #5b6d84;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .summary-card {
@@ -203,7 +252,12 @@
     align-self: stretch;
   }
 
+  .reports-graph-grid {
+    grid-template-columns: 1fr;
+  }
+
   .line-chart-card {
     padding: 0.65rem;
+    min-height: 220px;
   }
 }

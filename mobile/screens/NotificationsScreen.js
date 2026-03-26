@@ -7,7 +7,8 @@ import { db } from '../firebaseConfig';
 import axios from 'axios';
 import { getApiBaseUrl } from '../utils/api';
 
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 10;
+const API_PAGE_SIZE = 10;
 
 const toMillis = (value) => {
   if (!value) return 0;
@@ -19,12 +20,26 @@ const toMillis = (value) => {
 
 const formatDate = (value) => {
   const ms = toMillis(value);
-  if (!ms) return 'Unknown date';
+  if (!ms) return '';
   return new Date(ms).toLocaleString();
+};
+
+const getDateKey = (value) => {
+  const ms = toMillis(value);
+  if (!ms) return '';
+  return new Date(ms).toISOString().slice(0, 10);
 };
 
 const sortNotifications = (list = []) => {
   return [...list].sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+};
+
+const normalizeId = (value) => String(value ?? '').trim();
+const truncateText = (value, maxLen) => {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, Math.max(0, maxLen - 1)).trim()}...`;
 };
 
 export default function NotificationsScreen() {
@@ -41,7 +56,8 @@ export default function NotificationsScreen() {
       const userRaw = await AsyncStorage.getItem('user');
       const token = await AsyncStorage.getItem('token');
       const user = JSON.parse(userRaw || '{}');
-      if (!user?.userId || !token) {
+      const userId = normalizeId(user?.userId);
+      if (!userId || !token) {
         if (!silent) setToast('No active user session. Please login again.');
         setItems([]);
         setLoading(false);
@@ -50,13 +66,25 @@ export default function NotificationsScreen() {
       }
 
       const apiBaseUrl = await getApiBaseUrl();
-      const response = await axios.get(`${apiBaseUrl}/notifications/${user.userId}?limit=300`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const next = [];
+      let nextCursor = null;
 
-      const next = Array.isArray(response.data)
-        ? response.data
-        : (response.data.notifications || []);
+      do {
+        const params = new URLSearchParams();
+        params.set('limit', String(API_PAGE_SIZE));
+        if (nextCursor) params.set('cursor', nextCursor);
+
+        const response = await axios.get(`${apiBaseUrl}/notifications/${userId}?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const payload = Array.isArray(response.data)
+          ? { notifications: response.data, nextCursor: null }
+          : response.data;
+
+        next.push(...(payload.notifications || []));
+        nextCursor = payload.nextCursor || null;
+      } while (nextCursor);
 
       setItems(sortNotifications(next.filter((item) => item.isValid !== false)));
       setCurrentPage(1);
@@ -103,24 +131,19 @@ export default function NotificationsScreen() {
       try {
         const userRaw = await AsyncStorage.getItem('user');
         const user = JSON.parse(userRaw || '{}');
+        const userId = normalizeId(user?.userId);
 
-        if (!user?.userId) {
+        if (!userId) {
           setItems([]);
           setToast('No active user session. Please login again.');
           setLoading(false);
           return;
         }
 
-        const idCandidates = [...new Set([
-          user.userId,
-          String(user.userId),
-          Number.isNaN(Number(user.userId)) ? null : Number(user.userId),
-        ].filter((v) => v !== null && v !== undefined && v !== ''))];
-
         const q = query(
           collection(db, 'notifications'),
-          where('userId', 'in', idCandidates),
-          limit(300)
+          where('userId', '==', userId),
+          limit(API_PAGE_SIZE)
         );
 
         unsubscribe = onSnapshot(
@@ -134,6 +157,9 @@ export default function NotificationsScreen() {
             setCurrentPage(1);
             setRefreshing(false);
             setLoading(false);
+            if (!next.length) {
+              fetchFromBackend({ silent: true });
+            }
           },
           () => {
             fetchFromBackend();
@@ -166,6 +192,10 @@ export default function NotificationsScreen() {
     const start = (safePage - 1) * PAGE_SIZE;
     return items.slice(start, start + PAGE_SIZE);
   }, [items, safePage]);
+  const selectedCreatedAt = formatDate(selected?.createdAt);
+  const selectedCreatedDateKey = getDateKey(selected?.createdAt);
+  const selectedRelatedDate = String(selected?.relatedDate || '').trim();
+  const showRelatedDate = selectedRelatedDate && selectedRelatedDate !== selectedCreatedDateKey;
 
   return (
     <View style={styles.container}>
@@ -188,24 +218,27 @@ export default function NotificationsScreen() {
             keyExtractor={(item, index) => item.notificationId || item.__id || String(index)}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
             contentContainerStyle={styles.listContent}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                onPress={() => {
-                  setSelected(item);
-                  markAsRead(item);
-                }}
-              >
-                <Card style={styles.card}>
-                  <Card.Content>
-                    <Text style={styles.cardTitle}>
-                      {item.title || 'Notification'} {item.read || item.isRead ? '' : '(New)'}
-                    </Text>
-                    <Text numberOfLines={2} style={styles.cardBody}>{item.message || 'Tap to view details'}</Text>
-                    <Text style={styles.meta}>{formatDate(item.createdAt)}</Text>
-                  </Card.Content>
-                </Card>
-              </TouchableOpacity>
-            )}
+            renderItem={({ item }) => {
+              const createdAtLabel = formatDate(item.createdAt);
+              return (
+                <TouchableOpacity
+                  onPress={() => {
+                    setSelected(item);
+                    markAsRead(item);
+                  }}
+                >
+                  <Card style={styles.card}>
+                    <Card.Content style={styles.cardContent}>
+                      <Text style={styles.cardTitle}>
+                        {truncateText(item.title || 'Notification', 42)} {item.read || item.isRead ? '' : '(New)'}
+                      </Text>
+                      <Text numberOfLines={2} style={styles.cardBody}>{truncateText(item.message || 'Tap to view details', 96)}</Text>
+                      {createdAtLabel ? <Text style={styles.meta}>{createdAtLabel}</Text> : null}
+                    </Card.Content>
+                  </Card>
+                </TouchableOpacity>
+              );
+            }}
           />
           <View style={styles.paginationRow}>
             <Button mode="outlined" disabled={safePage <= 1} onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}>
@@ -225,8 +258,8 @@ export default function NotificationsScreen() {
             <Text style={styles.modalTitle}>{selected?.title || 'Notification'}</Text>
             <Text style={styles.modalBody}>{selected?.message || '-'}</Text>
             <Text style={styles.modalMeta}>Related DTR: {selected?.relatedDtrId || '-'}</Text>
-            <Text style={styles.modalMeta}>Date: {selected?.relatedDate || '-'}</Text>
-            <Text style={styles.modalMeta}>Timestamp: {formatDate(selected?.createdAt)}</Text>
+            {showRelatedDate ? <Text style={styles.modalMeta}>Date: {selectedRelatedDate}</Text> : null}
+            {selectedCreatedAt ? <Text style={styles.modalMeta}>Timestamp: {selectedCreatedAt}</Text> : null}
             <Button style={styles.closeBtn} mode="contained" onPress={() => setSelected(null)}>
               Close
             </Button>
@@ -290,21 +323,27 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   card: {
-    marginBottom: 10,
-    borderRadius: 12,
+    marginBottom: 8,
+    borderRadius: 10,
+  },
+  cardContent: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
   },
   cardTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
-    marginBottom: 3,
+    marginBottom: 2,
   },
   cardBody: {
     color: '#4f5d77',
+    lineHeight: 18,
+    fontSize: 13,
   },
   meta: {
-    marginTop: 6,
+    marginTop: 4,
     color: '#6b7488',
-    fontSize: 12,
+    fontSize: 11,
   },
   modalBackdrop: {
     flex: 1,

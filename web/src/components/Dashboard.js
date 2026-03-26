@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import StudentManagement from './StudentManagement';
 import DTRManagement from './DTRManagement';
 import DTRReports from './DTRReports';
+import AdminNotifications from './AdminNotifications';
 import './Dashboard.css';
 
 function MenuIcon({ type }) {
@@ -29,6 +30,14 @@ function MenuIcon({ type }) {
     );
   }
 
+  if (type === 'notifications') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 2a6 6 0 0 0-6 6v3.59L4.29 14.3A1 1 0 0 0 5 16h14a1 1 0 0 0 .71-1.7L18 11.59V8a6 6 0 0 0-6-6Zm0 20a3 3 0 0 0 2.83-2h-5.66A3 3 0 0 0 12 22Z" />
+      </svg>
+    );
+  }
+
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm2 12h2v3H7v-3Zm4-6h2v9h-2V9Zm4 3h2v6h-2v-6Z" />
@@ -45,6 +54,7 @@ function Dashboard({ user, setUser }) {
       { id: 'pending', label: 'Pending', title: 'Pending Tickets to Review' },
       { id: 'approved', label: 'Approved', title: 'Approved DTR Records' },
       { id: 'reports', label: 'Reports', title: 'DTR Reports and Student Progress' },
+      { id: 'notifications', label: 'Notifications', title: 'Admin Notifications and Activity Alerts' },
     ],
     []
   );
@@ -96,6 +106,7 @@ function Dashboard({ user, setUser }) {
             {activeTab === 'pending' && <DTRManagement lockedStatus="pending" />}
             {activeTab === 'approved' && <DTRManagement lockedStatus="approved" />}
             {activeTab === 'reports' && <DTRReports />}
+            {activeTab === 'notifications' && <AdminNotifications />}
           </div>
         </main>
       </div>

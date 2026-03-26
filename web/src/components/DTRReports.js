@@ -3,6 +3,7 @@ import axios from 'axios';
 import './DTRReports.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+const API_PAGE_SIZE = 10;
 
 const toMillis = (value) => {
   if (!value || value === '-') return 0;
@@ -23,20 +24,15 @@ const normalizeDateKey = (value) => {
   return toDateKey(parsed);
 };
 
-const getMonthShape = (month) => {
-  const [year, mon] = month.split('-').map(Number);
-  const lastDate = new Date(year, mon, 0).getDate();
-  // Use consistent month buckets by day-range: W1=1..7, W2=8..14 ... W5=29..31.
-  const weekCount = Math.min(5, Math.ceil(lastDate / 7));
-  return { year, mon, weekCount, lastDate };
+const getHourLabel = (value) => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return `${String(parsed.getHours()).padStart(2, '0')}:00`;
 };
 
-const getPeriodDateKeys = (periodType, month) => {
-  if (periodType === 'week') {
-    const { weekCount } = getMonthShape(month);
-    return Array.from({ length: weekCount }).map((_, idx) => `W${idx + 1}`);
-  }
+const getDayHourLabels = () => Array.from({ length: 24 }).map((_, hour) => `${String(hour).padStart(2, '0')}:00`);
 
+const getMonthDateKeys = (month) => {
   const [year, mon] = month.split('-').map(Number);
   const start = new Date(year, mon - 1, 1);
   const end = new Date(year, mon, 0);
@@ -48,25 +44,70 @@ const getPeriodDateKeys = (periodType, month) => {
   });
 };
 
-const getWeekLabelForDate = (dateStr, month) => {
-  const normalized = normalizeDateKey(dateStr);
-  if (!normalized) return null;
-  if (!normalized.startsWith(month)) return null;
-  const day = Number(normalized.slice(8, 10));
-  const bucket = Math.min(5, Math.ceil(day / 7));
-  return `W${bucket}`;
+const getWeekStartDateKey = (dateKey) => {
+  const normalized = normalizeDateKey(dateKey) || toDateKey(new Date());
+  const date = new Date(`${normalized}T00:00:00`);
+  const day = date.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + mondayOffset);
+  return toDateKey(date);
 };
 
-const buildLinePath = (points, width, height, maxY) => {
+const getWeekDateKeysFromDate = (dateKey) => {
+  const startKey = getWeekStartDateKey(dateKey);
+  const startDate = new Date(`${startKey}T00:00:00`);
+  return Array.from({ length: 7 }).map((_, idx) => {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + idx);
+    return toDateKey(d);
+  });
+};
+
+const getWeekDisplayLabel = (dateKey) => {
+  const d = new Date(`${dateKey}T00:00:00`);
+  const weekday = d.toLocaleDateString(undefined, { weekday: 'short' });
+  return `${weekday} ${dateKey.slice(5)}`;
+};
+
+const buildLinePath = (points, width, height, maxY, offsetX = 0, offsetY = 0) => {
   if (!points.length) return '';
   const safeMax = maxY <= 0 ? 1 : maxY;
   return points
     .map((pt, idx) => {
-      const x = points.length === 1 ? width / 2 : (idx / (points.length - 1)) * width;
-      const y = height - (pt.value / safeMax) * height;
+      const x = offsetX + (points.length === 1 ? width / 2 : (idx / (points.length - 1)) * width);
+      const y = offsetY + (height - (pt.value / safeMax) * height);
       return `${idx === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
     })
     .join(' ');
+};
+
+const getYAxisScale = (maxValue) => {
+  const safeMax = Math.max(0, Number(maxValue) || 0);
+  const defaultTop = 4;
+
+  // For low-frequency data, keep a predictable 0..4 axis.
+  if (safeMax <= defaultTop) {
+    const ticks = [4, 3, 2, 1, 0];
+    return { top: defaultTop, ticks };
+  }
+
+  // For larger values, pick a "nice" step so labels are readable.
+  const roughStep = safeMax / 4;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(roughStep)));
+  const normalized = roughStep / magnitude;
+
+  let niceNormalized;
+  if (normalized <= 1) niceNormalized = 1;
+  else if (normalized <= 2) niceNormalized = 2;
+  else if (normalized <= 5) niceNormalized = 5;
+  else niceNormalized = 10;
+
+  const step = niceNormalized * magnitude;
+  const top = Math.ceil(safeMax / step) * step;
+  const tickCount = Math.max(4, Math.round(top / step));
+  const ticks = Array.from({ length: tickCount + 1 }, (_, idx) => top - idx * step);
+
+  return { top, ticks };
 };
 
 function ReportLineChart({ title, points, color }) {
@@ -77,42 +118,73 @@ function ReportLineChart({ title, points, color }) {
   const offsetX = 44;
   const offsetY = 24;
 
-  const maxY = Math.max(...points.map((pt) => pt.value), 0);
-  const linePath = buildLinePath(points, plotWidth, plotHeight, maxY);
+  const sourcePoints = points.length ? points : [{ label: '--', value: 0 }];
+  // Keep line appearance in day mode where only one point exists.
+  const plotPoints = sourcePoints.length === 1
+    ? [{ ...sourcePoints[0], label: `${sourcePoints[0].label}-start` }, { ...sourcePoints[0], label: `${sourcePoints[0].label}-end` }]
+    : sourcePoints;
+
+  const dataPeak = Math.max(...sourcePoints.map((pt) => pt.value), 0);
+  const yAxis = getYAxisScale(dataPeak);
+  const yMax = yAxis.top;
+  const linePath = buildLinePath(plotPoints, plotWidth, plotHeight, yMax, offsetX, offsetY);
 
   return (
     <div className="line-chart-card">
       <div className="line-chart-head">
         <h4>{title}</h4>
-        <span>Peak: {maxY}</span>
+        <span>Peak: {dataPeak} shifts</span>
       </div>
       <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="line-chart-svg" role="img" aria-label={title}>
         <rect x={offsetX} y={offsetY} width={plotWidth} height={plotHeight} className="line-chart-bg" />
-        {[0, 1, 2, 3, 4].map((tick) => {
-          const y = offsetY + (plotHeight / 4) * tick;
-          return <line key={tick} x1={offsetX} x2={offsetX + plotWidth} y1={y} y2={y} className="line-chart-grid" />;
+        {yAxis.ticks.map((tickValue) => {
+          const y = offsetY + ((yMax - tickValue) / yMax) * plotHeight;
+          return <line key={`grid-${tickValue}`} x1={offsetX} x2={offsetX + plotWidth} y1={y} y2={y} className="line-chart-grid" />;
         })}
 
-        {points.map((pt, idx) => {
-          const x = points.length === 1 ? offsetX + plotWidth / 2 : offsetX + (idx / (points.length - 1)) * plotWidth;
-          const y = offsetY + (maxY ? plotHeight - (pt.value / maxY) * plotHeight : plotHeight);
-          return <circle key={pt.label} cx={x} cy={y} r="3" fill={color} />;
+        {plotPoints.map((pt, idx) => {
+          const x = plotPoints.length === 1 ? offsetX + plotWidth / 2 : offsetX + (idx / (plotPoints.length - 1)) * plotWidth;
+          const y = offsetY + (yMax ? plotHeight - (pt.value / yMax) * plotHeight : plotHeight);
+          return <circle key={`${pt.label}-${idx}`} cx={x} cy={y} r="3" fill={color} />;
         })}
 
         <path d={`M ${offsetX} ${offsetY + plotHeight} L ${offsetX + plotWidth} ${offsetY + plotHeight}`} className="line-chart-axis" />
         <path d={`M ${offsetX} ${offsetY} L ${offsetX} ${offsetY + plotHeight}`} className="line-chart-axis" />
 
-        <path d={`M ${offsetX} ${offsetY} ${linePath}`} fill="none" stroke={color} strokeWidth="2.5" />
+        {yAxis.ticks.map((tickValue) => {
+          const y = offsetY + ((yMax - tickValue) / yMax) * plotHeight;
+          return (
+            <text
+              key={`y-${tickValue}`}
+              x={offsetX - 8}
+              y={y + 3}
+              textAnchor="end"
+              className="line-chart-y-label"
+            >
+              {tickValue}
+            </text>
+          );
+        })}
 
-        {points.length > 0 && (
+        <path d={linePath} fill="none" stroke={color} strokeWidth="2.5" />
+
+        {sourcePoints.length > 0 && (
           <>
-            <text x={offsetX} y={offsetY + plotHeight + 18} className="line-chart-label">{points[0].label}</text>
-            <text x={offsetX + plotWidth / 2} y={offsetY + plotHeight + 18} textAnchor="middle" className="line-chart-label">
-              {points[Math.floor((points.length - 1) / 2)].label}
-            </text>
-            <text x={offsetX + plotWidth} y={offsetY + plotHeight + 18} textAnchor="end" className="line-chart-label">
-              {points[points.length - 1].label}
-            </text>
+            {sourcePoints.length === 1 ? (
+              <text x={offsetX + plotWidth / 2} y={offsetY + plotHeight + 18} textAnchor="middle" className="line-chart-label">
+                {sourcePoints[0].label}
+              </text>
+            ) : (
+              <>
+                <text x={offsetX} y={offsetY + plotHeight + 18} className="line-chart-label">{sourcePoints[0].label}</text>
+                <text x={offsetX + plotWidth / 2} y={offsetY + plotHeight + 18} textAnchor="middle" className="line-chart-label">
+                  {sourcePoints[Math.floor((sourcePoints.length - 1) / 2)].label}
+                </text>
+                <text x={offsetX + plotWidth} y={offsetY + plotHeight + 18} textAnchor="end" className="line-chart-label">
+                  {sourcePoints[sourcePoints.length - 1].label}
+                </text>
+              </>
+            )}
           </>
         )}
       </svg>
@@ -125,9 +197,16 @@ function DTRReports() {
   const [rows, setRows] = useState([]);
   const [trendRows, setTrendRows] = useState([]);
   const [periodType, setPeriodType] = useState('month');
+  const [mode, setMode] = useState('current');
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState('');
+
+  const todayKey = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const effectiveDate = mode === 'current' ? todayKey : selectedDate;
+  const effectiveMonth = mode === 'current' ? todayKey.slice(0, 7) : month;
+  const weekDateKeys = useMemo(() => getWeekDateKeysFromDate(effectiveDate), [effectiveDate]);
 
   useEffect(() => {
     const loadStudents = async () => {
@@ -155,26 +234,73 @@ function DTRReports() {
       setLoading(true);
       setNotice('');
       const token = localStorage.getItem('token');
+      const requiredMonths = new Set();
+      if (periodType === 'month') {
+        requiredMonths.add(effectiveMonth);
+      } else if (periodType === 'day') {
+        requiredMonths.add(effectiveDate.slice(0, 7));
+      } else {
+        weekDateKeys.forEach((dateKey) => requiredMonths.add(dateKey.slice(0, 7)));
+      }
 
-      const all = await Promise.all(
-        students.map(async (student) => {
-          const params = new URLSearchParams({ limit: '1000' });
-          params.set('month', month);
+      const fetchMonthRecords = async (studentId, monthKey) => {
+        const records = [];
+        let nextCursor = null;
 
-          const response = await axios.get(`${API_URL}/dtr/${student.userId}?${params.toString()}`, {
+        do {
+          const params = new URLSearchParams({ limit: String(API_PAGE_SIZE) });
+          params.set('month', monthKey);
+          if (nextCursor) params.set('cursor', nextCursor);
+
+          const response = await axios.get(`${API_URL}/dtr/${studentId}?${params.toString()}`, {
             headers: { Authorization: `Bearer ${token}` },
           });
 
-          const baseRecords = response.data.records || response.data || [];
-          const records = baseRecords;
+          const payload = Array.isArray(response.data)
+            ? { records: response.data, nextCursor: null }
+            : response.data;
+
+          const pageRecords = payload.records || [];
+          records.push(...pageRecords);
+          nextCursor = payload.nextCursor || null;
+        } while (nextCursor);
+
+        return records;
+      };
+
+      const all = await Promise.all(
+        students.map(async (student) => {
+          const monthFetches = await Promise.all(
+            Array.from(requiredMonths).map((monthKey) => fetchMonthRecords(student.userId, monthKey))
+          );
+          const seenRecordKeys = new Set();
+          const records = monthFetches
+            .flat()
+            .filter((record) => {
+              const key = record.dtrId || `${record.studentId || student.userId}-${record.date || ''}`;
+              if (seenRecordKeys.has(key)) return false;
+              seenRecordKeys.add(key);
+              return true;
+            });
+
+          let scopedRecords = records;
+          if (periodType === 'day') {
+            scopedRecords = records.filter((record) => normalizeDateKey(record.date) === effectiveDate);
+          } else if (periodType === 'week') {
+            const weekSet = new Set(weekDateKeys);
+            scopedRecords = records.filter((record) => weekSet.has(normalizeDateKey(record.date)));
+          } else {
+            scopedRecords = records.filter((record) => normalizeDateKey(record.date).startsWith(effectiveMonth));
+          }
 
           let totalMinutes = 0;
           let approvedShifts = 0;
           let pendingShifts = 0;
           let declinedShifts = 0;
           const perDay = {};
+          const perHour = {};
 
-          records.forEach((record) => {
+          scopedRecords.forEach((record) => {
             const dateKey = normalizeDateKey(record.date);
             if (!dateKey) return;
 
@@ -207,6 +333,18 @@ function DTRReports() {
                 pendingShifts += 1;
                 perDay[dateKey].pending += 1;
               }
+
+              if (periodType === 'day') {
+                const hourLabel = getHourLabel(inArr[i]) || getHourLabel(outArr[i]);
+                if (hourLabel) {
+                  if (!perHour[hourLabel]) {
+                    perHour[hourLabel] = { label: hourLabel, approved: 0, pending: 0, declined: 0 };
+                  }
+                  if (status === 'approved') perHour[hourLabel].approved += 1;
+                  else if (status === 'declined') perHour[hourLabel].declined += 1;
+                  else perHour[hourLabel].pending += 1;
+                }
+              }
             }
           });
 
@@ -217,19 +355,21 @@ function DTRReports() {
             userId: student.userId,
             studentName: `${student.firstName} ${student.lastName}`,
             username: student.username,
-            recordsCount: records.length,
+            recordsCount: scopedRecords.length,
             approvedShifts,
             pendingShifts,
             declinedShifts,
             totalMinutes,
             progressPct,
             perDay,
+            perHour,
           };
         })
       );
 
-      const periodKeys = getPeriodDateKeys(periodType, month);
+      const periodKeys = periodType === 'month' ? getMonthDateKeys(effectiveMonth) : [];
       const mergedByDate = {};
+      const mergedByHour = {};
       all.forEach((entry) => {
         Object.values(entry.perDay || {}).forEach((dayRow) => {
           if (!mergedByDate[dayRow.date]) {
@@ -240,25 +380,44 @@ function DTRReports() {
           mergedByDate[dayRow.date].pending += dayRow.pending;
           mergedByDate[dayRow.date].declined += dayRow.declined;
         });
+
+        Object.values(entry.perHour || {}).forEach((hourRow) => {
+          const key = hourRow.label;
+          if (!mergedByHour[key]) {
+            mergedByHour[key] = { label: key, approved: 0, pending: 0, declined: 0 };
+          }
+          mergedByHour[key].approved += hourRow.approved;
+          mergedByHour[key].pending += hourRow.pending;
+          mergedByHour[key].declined += hourRow.declined;
+        });
       });
 
       let mergedRows = [];
-      if (periodType === 'week') {
-        const byWeek = {};
-        periodKeys.forEach((wk) => {
-          byWeek[wk] = { label: wk, minutes: 0, approved: 0, pending: 0, declined: 0 };
+      if (periodType === 'day') {
+        const hourLabels = getDayHourLabels();
+        mergedRows = hourLabels.map((hourLabel) => {
+          const row = mergedByHour[hourLabel] || {
+            label: hourLabel,
+            approved: 0,
+            pending: 0,
+            declined: 0,
+          };
+          return { ...row, label: hourLabel };
         });
-
-        Object.values(mergedByDate).forEach((dayRow) => {
-          const wk = getWeekLabelForDate(dayRow.date, month);
-          if (!wk || !byWeek[wk]) return;
-          byWeek[wk].minutes += dayRow.minutes;
-          byWeek[wk].approved += dayRow.approved;
-          byWeek[wk].pending += dayRow.pending;
-          byWeek[wk].declined += dayRow.declined;
+      } else if (periodType === 'week') {
+        mergedRows = weekDateKeys.map((dateKey) => {
+          const row = mergedByDate[dateKey] || {
+            date: dateKey,
+            minutes: 0,
+            approved: 0,
+            pending: 0,
+            declined: 0,
+          };
+          return {
+            label: getWeekDisplayLabel(dateKey),
+            ...row,
+          };
         });
-
-        mergedRows = periodKeys.map((wk) => byWeek[wk]);
       } else {
         mergedRows = periodKeys.map((dateKey) => mergedByDate[dateKey] || {
           label: dateKey,
@@ -270,13 +429,13 @@ function DTRReports() {
       }
 
       setTrendRows(mergedRows);
-      setRows(all.map(({ perDay, ...rest }) => rest).sort((a, b) => b.totalMinutes - a.totalMinutes));
+      setRows(all.map(({ perDay, perHour, ...rest }) => rest).sort((a, b) => b.totalMinutes - a.totalMinutes));
     } catch (error) {
       setNotice('Unable to generate reports for this period.');
     } finally {
       setLoading(false);
     }
-  }, [students, periodType, month]);
+  }, [students, periodType, effectiveMonth, effectiveDate, weekDateKeys]);
 
   useEffect(() => {
     fetchReports();
@@ -306,6 +465,7 @@ function DTRReports() {
     const baseLabel = row?.label || row?.date || '';
     if (!baseLabel) return '--';
     if (periodType === 'week') return baseLabel;
+    if (periodType === 'day') return baseLabel;
     return baseLabel.includes('-') ? baseLabel.slice(5) : baseLabel;
   };
 
@@ -323,17 +483,103 @@ function DTRReports() {
     <div className="reports-page">
       <div className="reports-controls">
         <div className="reports-filter-group">
-          <label>Report Type</label>
-          <select value={periodType} onChange={(e) => setPeriodType(e.target.value)}>
-            <option value="month">Monthly</option>
-            <option value="week">Weekly</option>
-          </select>
+          <label>Graph Period</label>
+          <div className="reports-period-toggle" role="tablist" aria-label="Graph period filter">
+            <button
+              type="button"
+              className={`period-btn ${periodType === 'month' ? 'active' : ''}`}
+              onClick={() => setPeriodType('month')}
+              aria-pressed={periodType === 'month'}
+            >
+              Month
+            </button>
+            <button
+              type="button"
+              className={`period-btn ${periodType === 'week' ? 'active' : ''}`}
+              onClick={() => setPeriodType('week')}
+              aria-pressed={periodType === 'week'}
+            >
+              Week
+            </button>
+            <button
+              type="button"
+              className={`period-btn ${periodType === 'day' ? 'active' : ''}`}
+              onClick={() => setPeriodType('day')}
+              aria-pressed={periodType === 'day'}
+            >
+              Day
+            </button>
+          </div>
         </div>
 
         <div className="reports-filter-group">
-          <label>{periodType === 'week' ? 'Month for Weekly Buckets' : 'Month'}</label>
-          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+          <label>Range Mode</label>
+          <div className="reports-period-toggle" role="tablist" aria-label="Range mode filter">
+            <button
+              type="button"
+              className={`period-btn ${mode === 'current' ? 'active' : ''}`}
+              onClick={() => setMode('current')}
+              aria-pressed={mode === 'current'}
+            >
+              Current
+            </button>
+            <button
+              type="button"
+              className={`period-btn ${mode === 'custom' ? 'active' : ''}`}
+              onClick={() => setMode('custom')}
+              aria-pressed={mode === 'custom'}
+            >
+              Custom
+            </button>
+          </div>
         </div>
+
+        {periodType === 'day' ? (
+          <div className="reports-filter-group">
+            <label>{mode === 'current' ? 'Today' : 'Date'}</label>
+            <input
+              type="date"
+              value={mode === 'current' ? todayKey : selectedDate}
+              disabled={mode === 'current'}
+              onChange={(e) => {
+                const nextDate = e.target.value;
+                setSelectedDate(nextDate);
+                if (nextDate) {
+                  setMonth(nextDate.slice(0, 7));
+                }
+              }}
+            />
+          </div>
+        ) : (
+          <div className="reports-filter-group">
+            <label>
+              {periodType === 'week'
+                ? mode === 'current' ? 'Current Week Anchor Date' : 'Week Anchor Date'
+                : mode === 'current' ? 'Current Month' : 'Month'}
+            </label>
+            {periodType === 'week' ? (
+              <input
+                type="date"
+                value={mode === 'current' ? todayKey : selectedDate}
+                disabled={mode === 'current'}
+                onChange={(e) => {
+                  const nextDate = e.target.value;
+                  setSelectedDate(nextDate);
+                  if (nextDate) {
+                    setMonth(nextDate.slice(0, 7));
+                  }
+                }}
+              />
+            ) : (
+              <input
+                type="month"
+                value={mode === 'current' ? todayKey.slice(0, 7) : month}
+                disabled={mode === 'current'}
+                onChange={(e) => setMonth(e.target.value)}
+              />
+            )}
+          </div>
+        )}
 
         <button className="reports-refresh" onClick={fetchReports} disabled={loading}>
           {loading ? 'Generating...' : 'Refresh Report'}
@@ -362,8 +608,16 @@ function DTRReports() {
       </div>
 
       <div className="reports-graph-grid">
-        <ReportLineChart title={periodType === 'week' ? 'Weekly Pending Shifts Trend' : 'Daily Pending Shifts Trend'} points={pendingSeries} color="#d6861d" />
-        <ReportLineChart title={periodType === 'week' ? 'Weekly Approved Shifts Trend' : 'Daily Approved Shifts Trend'} points={approvedSeries} color="#1f9a5b" />
+        <ReportLineChart
+          title={periodType === 'week' ? '7-Day Pending Shifts Trend' : periodType === 'day' ? 'Hourly Pending Shifts Trend' : 'Daily Pending Shifts Trend'}
+          points={pendingSeries}
+          color="#d6861d"
+        />
+        <ReportLineChart
+          title={periodType === 'week' ? '7-Day Approved Shifts Trend' : periodType === 'day' ? 'Hourly Approved Shifts Trend' : 'Daily Approved Shifts Trend'}
+          points={approvedSeries}
+          color="#1f9a5b"
+        />
       </div>
 
       <div className="reports-table-wrap">

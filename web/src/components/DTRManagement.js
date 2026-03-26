@@ -4,6 +4,54 @@ import './DTRManagement.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
 
+function ActionIcon({ type }) {
+  if (type === 'approved') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M9.55 17.45 4.8 12.7l1.4-1.4 3.35 3.35 8.25-8.25 1.4 1.4-9.65 9.65Z" />
+      </svg>
+    );
+  }
+
+  if (type === 'declined') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m13.41 12 4.3-4.29-1.42-1.42-4.29 4.3-4.29-4.3-1.42 1.42 4.3 4.29-4.3 4.29 1.42 1.42 4.29-4.3 4.29 4.3 1.42-1.42-4.3-4.29Z" />
+      </svg>
+    );
+  }
+
+  if (type === 'pending') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 2a10 10 0 1 0 10 10A10.01 10.01 0 0 0 12 2Zm1 11h4v-2h-3V7h-2v6Z" />
+      </svg>
+    );
+  }
+
+  if (type === 'edit') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m3 17.25 9.81-9.81 3.75 3.75L6.75 21H3v-3.75Zm17.71-10.04a1 1 0 0 0 0-1.42l-2.5-2.5a1 1 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 2-1.66Z" />
+      </svg>
+    );
+  }
+
+  if (type === 'delete') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6 7h12v2H6V7Zm2 3h8l-.8 10H8.8L8 10Zm2-6h4l1 1h4v2H5V5h4l1-1Z" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Zm-1 8H6V9h12Zm-4 4H6v-2h8Z" />
+    </svg>
+  );
+}
+
 function DTRManagement({ lockedStatus }) {
   const [records, setRecords] = useState([]);
   const [students, setStudents] = useState([]);
@@ -180,6 +228,12 @@ function DTRManagement({ lockedStatus }) {
     return labels[status] || status;
   };
 
+  const getStatusIconType = (status) => {
+    if (status === 'approved') return 'approved';
+    if (status === 'declined') return 'declined';
+    return 'pending';
+  };
+
   // Fetch DTR whenever month filter changes
   useEffect(() => {
     if (selectedStudent) {
@@ -281,6 +335,7 @@ function DTRManagement({ lockedStatus }) {
 
                         <div className="gc-shift-status">
                           <span className={`status-badge status-${shift.status}`}>
+                            <span className="status-icon"><ActionIcon type={getStatusIconType(shift.status)} /></span>
                             {getStatusLabel(shift.status)}
                           </span>
                         </div>
@@ -291,15 +346,33 @@ function DTRManagement({ lockedStatus }) {
                               <input type="time" value={editTimeIn} onChange={e => setEditTimeIn(e.target.value)} />
                               <span>to</span>
                               <input type="time" value={editTimeOut} onChange={e => setEditTimeOut(e.target.value)} />
-                              <button onClick={() => saveEdit(shift)} className="btn-approve" title="Save">Save</button>
-                              <button onClick={() => setEditingRecord(null)} className="btn-delete" title="Cancel">Cancel</button>
+                              <button onClick={() => saveEdit(shift)} className="btn-approve action-btn" title="Save">
+                                <span className="action-btn-icon"><ActionIcon type="approved" /></span>
+                                <span>Save</span>
+                              </button>
+                              <button onClick={() => setEditingRecord(null)} className="btn-delete action-btn" title="Cancel">
+                                <span className="action-btn-icon"><ActionIcon type="declined" /></span>
+                                <span>Cancel</span>
+                              </button>
                             </div>
                           ) : (
                             <>
-                              <button onClick={() => updateShiftStatus(shift, 'approved')} className="btn-approve" title="Approve">Approve</button>
-                              <button onClick={() => updateShiftStatus(shift, 'declined')} className="btn-decline" title="Decline">Decline</button>
-                              <button onClick={() => startEditing(shift)} className="btn-edit" title="Edit">Edit</button>
-                              <button onClick={() => deleteShift(shift)} className="btn-delete" title="Delete">Delete</button>
+                              <button onClick={() => updateShiftStatus(shift, 'approved')} className="btn-approve action-btn" title="Approve">
+                                <span className="action-btn-icon"><ActionIcon type="approved" /></span>
+                                <span>Approve</span>
+                              </button>
+                              <button onClick={() => updateShiftStatus(shift, 'declined')} className="btn-decline action-btn" title="Decline">
+                                <span className="action-btn-icon"><ActionIcon type="declined" /></span>
+                                <span>Decline</span>
+                              </button>
+                              <button onClick={() => startEditing(shift)} className="btn-edit action-btn" title="Edit">
+                                <span className="action-btn-icon"><ActionIcon type="edit" /></span>
+                                <span>Edit</span>
+                              </button>
+                              <button onClick={() => deleteShift(shift)} className="btn-delete action-btn" title="Delete">
+                                <span className="action-btn-icon"><ActionIcon type="delete" /></span>
+                                <span>Delete</span>
+                              </button>
                             </>
                           )}
                         </div>

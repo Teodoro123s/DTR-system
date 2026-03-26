@@ -191,6 +191,28 @@ Create an admin user manually in Firestore or add a setup script.
 
 ## Recent Changes (March 2026)
 
+### Reporting and Graph Accuracy
+
+- Reports graph filter now supports `Month`, `Week`, and `Day` periods with clearer toggle controls
+- Added range mode behavior for reports:
+- `Current` mode uses current date context
+- `Custom` mode allows selecting specific date/month anchors
+- Weekly mode now uses true 7-day windows (Mon-Sun) instead of fixed month buckets
+- Day mode now plots hourly trend data (`00:00` to `23:00`) for clearer line representation
+- Y-axis now adapts to highest observed data frequency while keeping readable defaults for low-frequency datasets
+
+### Pagination Safety Precaution
+
+- Applied backend safety cap of maximum `10` records per request page on paginated endpoints
+- Updated web and mobile clients to use cursor-based pagination loops where complete period retrieval is required
+- Helps prevent oversized payloads and improves UI stability under larger datasets
+
+### Notifications UX and Payload Tuning
+
+- Compact notification card layouts for web and mobile to reduce container height
+- Removed duplicate/placeholder date rendering in notifications
+- Added notification text clamping to keep title/message lengths manageable and consistent in UI
+
 ### Backend/API
 
 - Added stronger API middleware defaults:

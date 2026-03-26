@@ -3,10 +3,30 @@ import { NativeModules, Platform } from 'react-native';
 
 const API_URL_KEY = 'api_url';
 const DEFAULT_PORT = '3000';
+let cachedWorkingUrl = null;
+let cacheCheckedAt = 0;
+const CACHE_TTL_MS = 45000;
 
 const clean = (value) => (value || '').toString().trim().replace(/\/+$/, '');
 
 const isSafeHttpUrl = (value) => /^https?:\/\//i.test(clean(value));
+
+const canReachApi = async (baseUrl) => {
+  if (!baseUrl || !isSafeHttpUrl(baseUrl)) return false;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500);
+    const response = await fetch(`${baseUrl}/health`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    return response.ok;
+  } catch (err) {
+    return false;
+  }
+};
 
 const extractHostFromScriptURL = () => {
   const scriptURL = NativeModules?.SourceCode?.scriptURL;
@@ -39,6 +59,24 @@ export const getApiCandidates = async () => {
 };
 
 export const getApiBaseUrl = async () => {
+  const now = Date.now();
+  if (cachedWorkingUrl && now - cacheCheckedAt < CACHE_TTL_MS) {
+    return cachedWorkingUrl;
+  }
+
+  const candidates = await getApiCandidates();
+  for (const candidate of candidates) {
+    // Return first responsive API endpoint and persist it.
+    // This avoids failures when env/saved IP becomes stale.
+    // eslint-disable-next-line no-await-in-loop
+    if (await canReachApi(candidate)) {
+      cachedWorkingUrl = candidate;
+      cacheCheckedAt = now;
+      await AsyncStorage.setItem(API_URL_KEY, candidate);
+      return candidate;
+    }
+  }
+
   const saved = clean(await AsyncStorage.getItem(API_URL_KEY));
   if (saved && isSafeHttpUrl(saved)) return saved;
 
@@ -55,5 +93,7 @@ export const getApiBaseUrl = async () => {
 export const persistApiBaseUrl = async (url) => {
   const normalized = clean(url);
   if (!normalized || !isSafeHttpUrl(normalized)) return;
+  cachedWorkingUrl = normalized;
+  cacheCheckedAt = Date.now();
   await AsyncStorage.setItem(API_URL_KEY, normalized);
 };

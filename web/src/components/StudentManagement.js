@@ -4,6 +4,59 @@ import './StudentManagement.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
 
+function ActionIcon({ type }) {
+  if (type === 'add') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M19 11h-6V5h-2v6H5v2h6v6h2v-6h6v-2Z" />
+      </svg>
+    );
+  }
+  if (type === 'save') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4ZM7 5h8v4H7V5Zm12 14H5v-8h14v8Z" />
+      </svg>
+    );
+  }
+  if (type === 'cancel') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m13.41 12 4.3-4.29-1.42-1.42-4.29 4.3-4.29-4.3-1.42 1.42 4.3 4.29-4.3 4.29 1.42 1.42 4.29-4.3 4.29 4.3 1.42-1.42-4.3-4.29Z" />
+      </svg>
+    );
+  }
+  if (type === 'edit') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m3 17.25 9.81-9.81 3.75 3.75L6.75 21H3v-3.75Zm17.71-10.04a1 1 0 0 0 0-1.42l-2.5-2.5a1 1 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 2-1.66Z" />
+      </svg>
+    );
+  }
+  if (type === 'reset') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 5V2L8 6l4 4V7a5 5 0 1 1-4.9 6h-2.02A7 7 0 1 0 12 5Z" />
+      </svg>
+    );
+  }
+  if (type === 'report') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm2 12h2v3H7v-3Zm4-6h2v9h-2V9Zm4 3h2v6h-2v-6Z" />
+      </svg>
+    );
+  }
+  if (type === 'delete') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M6 7h12v2H6V7Zm2 3h8l-.8 10H8.8L8 10Zm2-6h4l1 1h4v2H5V5h4l1-1Z" />
+      </svg>
+    );
+  }
+  return null;
+}
+
 function StudentManagement() {
   const [students, setStudents] = useState([]);
   const [firstName, setFirstName] = useState('');
@@ -241,7 +294,8 @@ function StudentManagement() {
             className="form-input"
           />
           <button onClick={createStudent} className="btn btn-primary" disabled={loading}>
-            Add Student
+            <span className="btn-icon"><ActionIcon type="add" /></span>
+            <span>Add Student</span>
           </button>
         </div>
       </div>
@@ -289,7 +343,8 @@ function StudentManagement() {
                     <div className="col-username">{student.username}</div>
                     <div className="col-actions">
                       <button onClick={() => updateStudent(student.userId)} className="btn btn-sm btn-success">
-                        Save
+                        <span className="btn-icon"><ActionIcon type="save" /></span>
+                        <span>Save</span>
                       </button>
                       <button
                         onClick={() => {
@@ -299,7 +354,8 @@ function StudentManagement() {
                         }}
                         className="btn btn-sm btn-secondary"
                       >
-                        Cancel
+                        <span className="btn-icon"><ActionIcon type="cancel" /></span>
+                        <span>Cancel</span>
                       </button>
                     </div>
                   </>
@@ -316,19 +372,23 @@ function StudentManagement() {
                         }}
                         className="btn btn-sm btn-edit"
                       >
-                        Edit
+                        <span className="btn-icon"><ActionIcon type="edit" /></span>
+                        <span>Edit</span>
                       </button>
                       <button onClick={() => resetCredentials(student.userId)} className="btn btn-sm btn-warning">
-                        Reset
+                        <span className="btn-icon"><ActionIcon type="reset" /></span>
+                        <span>Reset</span>
                       </button>
                       <button
                         onClick={() => setReportStudentId(student.userId)}
                         className="btn btn-sm btn-secondary"
                       >
-                        View Report
+                        <span className="btn-icon"><ActionIcon type="report" /></span>
+                        <span>View Report</span>
                       </button>
                       <button onClick={() => deleteStudent(student.userId)} className="btn btn-sm btn-danger">
-                        Delete
+                        <span className="btn-icon"><ActionIcon type="delete" /></span>
+                        <span>Delete</span>
                       </button>
                     </div>
                   </>
