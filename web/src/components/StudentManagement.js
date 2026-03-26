@@ -3,6 +3,7 @@ import axios from 'axios';
 import './StudentManagement.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+const PAGE_SIZE = 10;
 
 function ActionIcon({ type }) {
   if (type === 'add') {
@@ -74,6 +75,8 @@ function StudentManagement() {
   const [reportSummary, setReportSummary] = useState({ minutes: 0, sessions: 0, approved: 0, pending: 0, declined: 0 });
   const [reportLoading, setReportLoading] = useState(false);
   const [reportNotice, setReportNotice] = useState('');
+  const [studentsPage, setStudentsPage] = useState(1);
+  const [reportPage, setReportPage] = useState(1);
 
   const fetchStudents = useCallback(async () => {
     try {
@@ -272,6 +275,32 @@ function StudentManagement() {
     return target.includes(searchTerm.trim().toLowerCase());
   });
 
+  const studentTotalPages = Math.max(1, Math.ceil(visibleStudents.length / PAGE_SIZE));
+  const safeStudentsPage = Math.min(studentsPage, studentTotalPages);
+  const studentStart = (safeStudentsPage - 1) * PAGE_SIZE;
+  const paginatedStudents = visibleStudents.slice(studentStart, studentStart + PAGE_SIZE);
+
+  const reportTotalPages = Math.max(1, Math.ceil(reportRows.length / PAGE_SIZE));
+  const safeReportPage = Math.min(reportPage, reportTotalPages);
+  const reportStart = (safeReportPage - 1) * PAGE_SIZE;
+  const paginatedReportRows = reportRows.slice(reportStart, reportStart + PAGE_SIZE);
+
+  useEffect(() => {
+    setStudentsPage(1);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    setStudentsPage((prev) => Math.min(prev, studentTotalPages));
+  }, [studentTotalPages]);
+
+  useEffect(() => {
+    setReportPage(1);
+  }, [reportStudentId, reportMonth]);
+
+  useEffect(() => {
+    setReportPage((prev) => Math.min(prev, reportTotalPages));
+  }, [reportTotalPages]);
+
   return (
     <div className="student-management">
       {notice && <p className={`notice-banner notice-${noticeType}`}>{notice}</p>}
@@ -316,16 +345,19 @@ function StudentManagement() {
         ) : visibleStudents.length === 0 ? (
           <p className="empty">No student matches the current search.</p>
         ) : (
-          <div className="students-table">
-            <div className="table-header">
-              <div className="col-name">Name</div>
-              <div className="col-username">Username</div>
-              <div className="col-actions">Actions</div>
-            </div>
-            {visibleStudents.map(student => (
-              <div key={student.userId} className="table-row">
+          <div className="students-table-wrap">
+            <div className="students-table">
+              <div className="table-header">
+                <div className="col-no">No.</div>
+                <div className="col-name">Student</div>
+                <div className="col-username">Username</div>
+                <div className="col-actions">Actions</div>
+              </div>
+              {paginatedStudents.map((student, index) => (
+                <div key={student.userId} className="table-row">
                 {editing === student.userId ? (
                   <>
+                    <div className="col-no">{studentStart + index + 1}</div>
                     <div className="col-name">
                       <input
                         type="text"
@@ -361,6 +393,7 @@ function StudentManagement() {
                   </>
                 ) : (
                   <>
+                    <div className="col-no">{studentStart + index + 1}</div>
                     <div className="col-name">{student.firstName} {student.lastName}</div>
                     <div className="col-username">{student.username}</div>
                     <div className="col-actions">
@@ -393,8 +426,29 @@ function StudentManagement() {
                     </div>
                   </>
                 )}
-              </div>
-            ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {visibleStudents.length > PAGE_SIZE && (
+          <div className="pagination-row">
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={() => setStudentsPage((prev) => Math.max(1, prev - 1))}
+              disabled={safeStudentsPage === 1}
+            >
+              Previous
+            </button>
+            <span className="pagination-text">Page {safeStudentsPage} of {studentTotalPages}</span>
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={() => setStudentsPage((prev) => Math.min(studentTotalPages, prev + 1))}
+              disabled={safeStudentsPage === studentTotalPages}
+            >
+              Next
+            </button>
           </div>
         )}
       </div>
@@ -459,7 +513,7 @@ function StudentManagement() {
               </tr>
             </thead>
             <tbody>
-              {reportRows.map((row) => (
+              {paginatedReportRows.map((row) => (
                 <tr key={row.dtrId}>
                   <td>{row.date}</td>
                   <td>{row.sessions}</td>
@@ -479,6 +533,26 @@ function StudentManagement() {
             </tbody>
           </table>
         </div>
+
+        {reportRows.length > PAGE_SIZE && (
+          <div className="pagination-row">
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={() => setReportPage((prev) => Math.max(1, prev - 1))}
+              disabled={safeReportPage === 1}
+            >
+              Previous
+            </button>
+            <span className="pagination-text">Page {safeReportPage} of {reportTotalPages}</span>
+            <button
+              className="btn btn-sm btn-secondary"
+              onClick={() => setReportPage((prev) => Math.min(reportTotalPages, prev + 1))}
+              disabled={safeReportPage === reportTotalPages}
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -53,6 +53,7 @@ function ActionIcon({ type }) {
 }
 
 function DTRManagement({ lockedStatus }) {
+  const currentMonth = new Date().toISOString().slice(0, 7);
   const [records, setRecords] = useState([]);
   const [students, setStudents] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState('');
@@ -64,7 +65,7 @@ function DTRManagement({ lockedStatus }) {
   const [editTimeOut, setEditTimeOut] = useState('');
   
   // Custom Filters for neat report display
-  const [selectedMonth, setSelectedMonth] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [selectedStatus, setSelectedStatus] = useState(lockedStatus || 'all');
 
   useEffect(() => {
@@ -355,7 +356,7 @@ function DTRManagement({ lockedStatus }) {
                                 <span>Cancel</span>
                               </button>
                             </div>
-                          ) : (
+                          ) : shift.status === 'approved' ? null : (
                             <>
                               <button onClick={() => updateShiftStatus(shift, 'approved')} className="btn-approve action-btn" title="Approve">
                                 <span className="action-btn-icon"><ActionIcon type="approved" /></span>
