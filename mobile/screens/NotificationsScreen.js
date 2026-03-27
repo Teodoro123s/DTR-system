@@ -24,12 +24,6 @@ const formatDate = (value) => {
   return new Date(ms).toLocaleString();
 };
 
-const getDateKey = (value) => {
-  const ms = toMillis(value);
-  if (!ms) return '';
-  return new Date(ms).toISOString().slice(0, 10);
-};
-
 const sortNotifications = (list = []) => {
   return [...list].sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
 };
@@ -193,9 +187,6 @@ export default function NotificationsScreen() {
     return items.slice(start, start + PAGE_SIZE);
   }, [items, safePage]);
   const selectedCreatedAt = formatDate(selected?.createdAt);
-  const selectedCreatedDateKey = getDateKey(selected?.createdAt);
-  const selectedRelatedDate = String(selected?.relatedDate || '').trim();
-  const showRelatedDate = selectedRelatedDate && selectedRelatedDate !== selectedCreatedDateKey;
 
   return (
     <View style={styles.container}>
@@ -256,9 +247,8 @@ export default function NotificationsScreen() {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{selected?.title || 'Notification'}</Text>
+            {selectedCreatedAt ? <Text style={styles.modalTimestamp}>{selectedCreatedAt}</Text> : null}
             <Text style={styles.modalBody}>{selected?.message || '-'}</Text>
-            {showRelatedDate ? <Text style={styles.modalMeta}>Date: {selectedRelatedDate}</Text> : null}
-            {selectedCreatedAt ? <Text style={styles.modalMeta}>Timestamp: {selectedCreatedAt}</Text> : null}
             <Button style={styles.closeBtn} mode="contained" onPress={() => setSelected(null)}>
               Close
             </Button>
@@ -364,6 +354,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#3f4a61',
     marginBottom: 12,
+  },
+  modalTimestamp: {
+    fontSize: 12,
+    marginBottom: 10,
+    color: '#1f6feb',
+    fontWeight: '600',
   },
   modalMeta: {
     fontSize: 13,

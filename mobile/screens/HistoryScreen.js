@@ -27,11 +27,13 @@ const getStatusColor = (status) => {
 const pairTimes = (record) => {
   const inArr = record?.timeIn || [];
   const outArr = record?.timeOut || [];
+  const statusArr = record?.shiftStatuses || [];
   const maxLen = Math.max(inArr.length, outArr.length);
   return Array.from({ length: maxLen }).map((_, index) => ({
     index: index + 1,
     timeIn: inArr[index] || '-',
     timeOut: outArr[index] || '-',
+    status: statusArr[index] || record?.status || 'pending',
   }));
 };
 
@@ -79,6 +81,7 @@ export default function HistoryScreen() {
   const [reviewVisible, setReviewVisible] = useState(false);
   const [reviewRows, setReviewRows] = useState([]);
   const [reviewOverallMinutes, setReviewOverallMinutes] = useState(0);
+  const [statusFilter, setStatusFilter] = useState('all');
 
   const fetchRecords = async ({ reset = false, explicitMonth = month } = {}) => {
     try {
@@ -232,46 +235,66 @@ export default function HistoryScreen() {
   };
 
   const writeExcelFile = async (rows, monthLabel, monthTotalMinutes) => {
-    const exportRows = [
-      ...rows.map((row) => ({
-        'Day #': row.dayNumber,
-        Date: row.date,
-        'Time In': row.timeIn,
-        'Time Out': row.timeOut,
-        Status: row.status,
-        'Total Hours': row.totalHours,
-      })),
-      {
-        'Day #': '',
-        Date: 'MONTH TOTAL',
-        'Time In': '',
-        'Time Out': '',
-        Status: '',
-        'Total Hours': formatMinutes(monthTotalMinutes),
-      },
-    ];
+    try {
+      if (!rows || rows.length === 0) {
+        throw new Error('No data to export');
+      }
 
-    const worksheet = XLSX.utils.json_to_sheet(exportRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Monthly DTR');
+      const exportRows = [
+        ...rows.map((row) => ({
+          'Day #': row.dayNumber || '-',
+          Date: row.date || '-',
+          'Time In': row.timeIn || '--:--',
+          'Time Out': row.timeOut || '--:--',
+          Status: row.status || 'Pending',
+          'Total Hours': row.totalHours || '0h 0m',
+        })),
+        {
+          'Day #': '',
+          Date: 'MONTH TOTAL',
+          'Time In': '',
+          'Time Out': '',
+          Status: '',
+          'Total Hours': formatMinutes(monthTotalMinutes),
+        },
+      ];
 
-    const wbBase64 = XLSX.write(workbook, { type: 'base64', bookType: 'xlsx' });
-    const outputPath = `${FileSystem.cacheDirectory}dtr-${monthLabel}.xlsx`;
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Monthly DTR');
 
-    await FileSystem.writeAsStringAsync(outputPath, wbBase64, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+      // Write to array buffer and convert to base64
+      const wbArray = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' });
+      
+      // Convert Uint8Array to base64 string
+      let wbBase64 = '';
+      const bytes = new Uint8Array(wbArray);
+      for (let i = 0; i < bytes.length; i++) {
+        wbBase64 += String.fromCharCode(bytes[i]);
+      }
+      wbBase64 = btoa(wbBase64);
 
-    const canShare = await Sharing.isAvailableAsync();
-    if (canShare) {
-      await Sharing.shareAsync(outputPath, {
-        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        dialogTitle: `Download DTR Excel (${monthLabel})`,
-        UTI: 'org.openxmlformats.spreadsheetml.sheet',
+      const fileName = `dtr-${monthLabel.replace(/-/g, '-')}.xlsx`;
+      const outputPath = `${FileSystem.cacheDirectory}${fileName}`;
+
+      await FileSystem.writeAsStringAsync(outputPath, wbBase64, {
+        encoding: FileSystem.EncodingType.Base64,
       });
-      setMessage(`Monthly Excel ready: ${monthLabel}`);
-    } else {
-      setMessage(`Excel generated at: ${outputPath}`);
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(outputPath, {
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          dialogTitle: `Download DTR Excel (${monthLabel})`,
+          UTI: 'org.openxmlformats.spreadsheetml.sheet',
+        });
+        setMessage(`Monthly Excel shared: ${monthLabel}`);
+      } else {
+        setMessage(`Excel generated at: ${outputPath}`);
+      }
+    } catch (error) {
+      console.error('writeExcelFile error:', error);
+      throw new Error(`Excel export failed: ${error.message}`);
     }
   };
 
@@ -280,18 +303,27 @@ export default function HistoryScreen() {
       setExporting(true);
       const monthRecords = await fetchAllMonthRecords(month);
 
-      if (!monthRecords.length) {
-        setMessage(`No records found for ${month}.`);
+      if (!monthRecords || monthRecords.length === 0) {
+        setMessage(`No records found for ${month}`);
+        setExporting(false);
         return;
       }
 
       const { rows, monthTotalMinutes } = buildMonthlySheetRows(monthRecords);
+      
+      if (!rows || rows.length === 0) {
+        setMessage('No valid records to export');
+        setExporting(false);
+        return;
+      }
+
       setReviewRows(rows);
       setReviewOverallMinutes(monthTotalMinutes);
       setReviewVisible(true);
+      setExporting(false);
     } catch (err) {
-      setMessage(err.message || 'Failed to create monthly Excel file');
-    } finally {
+      console.error('openReviewBeforeDownload error:', err);
+      setMessage(err.message || 'Failed to prepare monthly report');
       setExporting(false);
     }
   };
@@ -299,9 +331,13 @@ export default function HistoryScreen() {
   const confirmDownloadFromReview = async () => {
     try {
       setExporting(true);
+      if (!reviewRows || reviewRows.length === 0) {
+        throw new Error('No review data available');
+      }
       await writeExcelFile(reviewRows, month, reviewOverallMinutes);
       setReviewVisible(false);
     } catch (err) {
+      console.error('confirmDownloadFromReview error:', err);
       setMessage(err.message || 'Failed to download monthly Excel');
     } finally {
       setExporting(false);
@@ -326,7 +362,18 @@ export default function HistoryScreen() {
     return date >= weekStart && date <= weekEnd;
   };
 
-  const filteredRecords = records.filter((record) => (record.date || '').startsWith(month));
+  // All records for the selected month (used for calendar marking)
+  const monthRecords = records.filter((record) => (record.date || '').startsWith(month));
+
+  // Filtered records for list view (applied status filter)
+  // Filter by checking if record has any shift with the requested status
+  const filteredRecords = monthRecords
+    .filter((record) => {
+      if (statusFilter === 'all') return true;
+      const shifts = pairTimes(record);
+      return shifts.some((shift) => shift.status === statusFilter);
+    })
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
 
   const selectedDateRecords = filteredRecords.filter((record) => record.date === selectedDate);
   const totalListPages = Math.max(1, Math.ceil(filteredRecords.length / LIST_PAGE_SIZE));
@@ -347,19 +394,25 @@ export default function HistoryScreen() {
 
   const statusSummary = filteredRecords.reduce(
     (acc, item) => {
-      const key = item.status || 'unknown';
-      if (acc[key] === undefined) acc[key] = 0;
-      acc[key] += 1;
+      const shifts = pairTimes(item);
+      shifts.forEach((shift) => {
+        const key = shift.status || 'pending';
+        if (acc[key] === undefined) acc[key] = 0;
+        acc[key] += 1;
+      });
       return acc;
     },
     { approved: 0, pending: 0, declined: 0 }
   );
 
-  const markedDates = filteredRecords.reduce((acc, record) => {
-    acc[record.date] = {
-      marked: true,
-      dotColor: getStatusColor(record.status),
-    };
+  // Calendar shows ALL dates with records (not filtered by status) to avoid confusion
+  const markedDates = monthRecords.reduce((acc, record) => {
+    if (!acc[record.date]) {
+      acc[record.date] = {
+        marked: true,
+        dotColor: '#1f6feb', // Simple blue dot for all dates with records
+      };
+    }
     return acc;
   }, {});
 
@@ -393,15 +446,21 @@ export default function HistoryScreen() {
         <Card.Content>
           <View style={styles.cardHeader}>
             <Text style={styles.cardDate}>{item.date}</Text>
-            <Chip compact style={{ backgroundColor: getStatusColor(item.status) }} textStyle={{ color: '#fff' }}>
-              {toStatusLabel(item.status)}
-            </Chip>
           </View>
           <Text style={styles.sessionCount}>{pairTimes(item).length} session(s)</Text>
           {pairTimes(item).map((pair) => (
-            <Text key={`${item.dtrId}-${pair.index}`} style={styles.pairRow}>
-              #{pair.index}: {formatTimeValue(pair.timeIn)} {'->'} {formatTimeValue(pair.timeOut)}
-            </Text>
+            <View key={`${item.dtrId}-${pair.index}`} style={styles.pairRowContainer}>
+              <Text style={styles.pairRow}>
+                #{pair.index}: {formatTimeValue(pair.timeIn)} {'->'} {formatTimeValue(pair.timeOut)}
+              </Text>
+              <Chip 
+                compact 
+                style={{ backgroundColor: getStatusColor(pair.status), alignSelf: 'flex-start' }} 
+                textStyle={{ color: '#fff', fontSize: 11 }}
+              >
+                {toStatusLabel(pair.status)}
+              </Chip>
+            </View>
           ))}
         </Card.Content>
       </Card>
@@ -505,6 +564,23 @@ export default function HistoryScreen() {
           <Text style={styles.monthLabel}>{month}</Text>
           <Button compact onPress={() => changeMonth(1)}>Next</Button>
         </View>
+
+        <View style={styles.filterHelpText}>
+          <Text style={styles.helpTextLabel}>Filter by Status:</Text>
+        </View>
+
+        <SegmentedButtons
+          value={statusFilter}
+          onValueChange={setStatusFilter}
+          style={styles.statusFilter}
+          buttons={[
+            { value: 'all', label: 'All' },
+            { value: 'approved', label: 'Approved' },
+            { value: 'pending', label: 'Pending' },
+            { value: 'declined', label: 'Declined' },
+          ]}
+        />
+        <Text style={styles.filterHint}>Showing {filteredRecords.length} of {monthRecords.length} records</Text>
 
         <Button
           mode="contained"
@@ -618,7 +694,16 @@ export default function HistoryScreen() {
             </View>
             {pairTimes(selectedRecord || {}).map((pair) => (
               <View key={`modal-${pair.index}`} style={styles.sessionBlock}>
-                <Text style={styles.sessionTitle}>Log {pair.index}</Text>
+                <View style={styles.sessionHeader}>
+                  <Text style={styles.sessionTitle}>Log {pair.index}</Text>
+                  <Chip 
+                    compact 
+                    style={{ backgroundColor: getStatusColor(pair.status) }} 
+                    textStyle={{ color: '#fff', fontSize: 11 }}
+                  >
+                    {toStatusLabel(pair.status)}
+                  </Chip>
+                </View>
                 <Text style={styles.modalInfo}>Time In: {formatTimeValue(pair.timeIn)}</Text>
                 <Text style={styles.modalInfo}>Time Out: {formatTimeValue(pair.timeOut)}</Text>
                 {selectedRecord?.status === 'pending' && (
@@ -782,6 +867,32 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingBottom: 8,
   },
+  filterLabel: {
+    fontWeight: '600',
+    color: '#344c71',
+    fontSize: 13,
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  filterHelpText: {
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  helpTextLabel: {
+    fontWeight: '600',
+    color: '#344c71',
+    fontSize: 13,
+  },
+  filterHint: {
+    fontSize: 12,
+    color: '#667188',
+    marginTop: 6,
+    marginBottom: 10,
+    fontStyle: 'italic',
+  },
+  statusFilter: {
+    marginBottom: 0,
+  },
   approvedChip: {
     backgroundColor: '#e7f6ec',
   },
@@ -831,6 +942,10 @@ const styles = StyleSheet.create({
   pairRow: {
     color: '#4d5974',
     marginBottom: 3,
+  },
+  pairRowContainer: {
+    marginBottom: 8,
+    paddingVertical: 4,
   },
   emptyState: {
     textAlign: 'center',
@@ -917,6 +1032,12 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 8,
     backgroundColor: '#fcfdff',
+  },
+  sessionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   sessionActionRow: {
     flexDirection: 'row',
