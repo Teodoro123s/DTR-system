@@ -4,7 +4,7 @@ import { ActivityIndicator, Button, Card, Chip, SegmentedButtons, Snackbar, Text
 import { Calendar } from 'react-native-calendars';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as XLSX from 'xlsx';
 import { getApiBaseUrl } from '../utils/api';
@@ -278,7 +278,7 @@ export default function HistoryScreen() {
       const outputPath = `${FileSystem.cacheDirectory}${fileName}`;
 
       await FileSystem.writeAsStringAsync(outputPath, wbBase64, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: 'base64',
       });
 
       const canShare = await Sharing.isAvailableAsync();
